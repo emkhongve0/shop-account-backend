@@ -1,0 +1,250 @@
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum UserStatus {
+  PENDING
+  ACTIVE
+  LOCKED
+  BANNED
+}
+
+enum UserRole {
+  USER
+  ADMIN
+}
+
+model User {
+  id                 Int                 @id @default(autoincrement())
+  email              String              @unique
+  displayName        String
+  passwordHash       String
+  status             String              @default("PENDING")
+  balance            Int                 @default(0)
+  role               UserRole            @default(USER)
+  walletTransactions WalletTransaction[]
+  createdAt          DateTime            @default(now())
+
+  // ĐẢM BẢO CÓ ĐỦ 4 DÒNG KHAI BÁO MỐI QUAN HỆ NÀY:
+  authLogs      AuthLog[] // Giữ nguyên dòng cũ của bạn (nếu có)
+  deposits      Deposit[] // Khớp với model Deposit ở dưới
+  orders        Order[] // Khớp với model Order ở dưới
+  notifications Notification[] // Khớp với model Notification ở dưới
+}
+
+// Định nghĩa Enum cho các loại biến động số dư
+enum TransactionType {
+  DEPOSIT // Nạp tiền
+  BUY // Mua hàng
+  ADMIN_INCREMENT // Admin cộng tiền
+  ADMIN_DECREMENT // Admin trừ tiền
+}
+
+// Bảng Nhật ký giao dịch ví (wallet_transactions)
+model WalletTransaction {
+  id     Int  @id @default(autoincrement())
+  userId Int  @map("user_id")
+  user   User @relation(fields: [userId], references: [id])
+
+  type          TransactionType // Loại giao dịch
+  amount        Int // Số tiền biến động (Luôn lưu số dương, phân biệt tăng giảm qua `type`)
+  balanceBefore Int             @map("balance_before") // Số dư TRƯỚC khi đổi
+  balanceAfter  Int             @map("balance_after") // Số dư SAU khi đổi
+
+  referenceId String? @map("reference_id") // Mã đơn nạp (DEPxxx) hoặc mã đơn hàng (ORDxxx)
+  description String? // Lý do biến động (Khuyến mãi, Mua Facebook VIA...)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("wallet_transactions")
+}
+
+model AuthLog {
+  id        Int      @id @default(autoincrement())
+  userId    Int?
+  user      User?    @relation(fields: [userId], references: [id])
+  action    String // REGISTER, LOGIN_SUCCESS, LOGIN_FAIL
+  ip        String
+  userAgent String
+  country   String   @default("Unknown")
+  device    String   @default("Unknown")
+  createdAt DateTime @default(now())
+}
+
+// 1. Model Lịch sử nạp tiền
+model Deposit {
+  id          Int      @id @default(autoincrement())
+  userId      Int
+  amount      Int      @default(0) // Số tiền hệ thống nhận được thực tế (hoặc dự kiến)
+  method      String // BANKING, MOMO...
+  status      String   @default("PENDING") // PENDING, SUCCESS, EXPIRED
+  description String   @unique // Lưu mã nạp tiền duy nhất (Ví dụ: DEP-7XQ8K2)
+  bankTxId    String?  @unique // MÃ GIAO DỊCH NGÂN HÀNG (Ví dụ: 2026070800003988504). Rất quan trọng để CHỐNG CỘNG TIỀN 2 LẦN
+  expiredAt   DateTime // Thời gian hết hạn lệnh nạp (now + 10 phút)
+  createdAt   DateTime @default(now())
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([description])
+  @@map("deposits")
+}
+
+// 2. Model Lịch sử mua hàng
+model Order {
+  id             Int           @id @default(autoincrement())
+  userId         Int
+  productId      Int?
+  totalPrice     Int // Tổng tiền đơn hàng
+  status         String        @default("COMPLETED")
+  accountDetails String // Thông tin tài khoản đã mua (Dạng chuỗi hoặc JSON mã hóa)
+  createdAt      DateTime      @default(now())
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product        Product? @relation(fields: [productId], references: [id])
+  orderDetails   OrderDetail[]
+
+  @@map("orders")
+}
+
+// 3. Model Hệ thống Thông báo (Notification)
+model Notification {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  title     String // Tiêu đề thông báo
+  content   String // Nội dung thông báo
+  isRead    Boolean  @default(false) // Trạng thái đã đọc hay chưa
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notifications")
+}
+
+// 4. Model Quản lý Voucher (Mã giảm giá)
+model Voucher {
+  id         Int      @id @default(autoincrement())
+  code       String   @unique // Mã giảm giá (VÍ DỤ: GIAM20K)
+  discount   Int // Số tiền được giảm hoặc phần trăm
+  type       String   @default("FIXED") // FIXED (trừ thẳng tiền) hoặc PERCENT (giảm %)
+  maxUses    Int      @default(1) // Số lần sử dụng tối đa của mã này
+  usedCount  Int      @default(0) // Số lần đã được sử dụng
+  expiryDate DateTime // Ngày hết hạn mã
+  createdAt  DateTime @default(now())
+
+  @@map("vouchers")
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    Int? // Sửa lại thành Int cho đồng bộ với kiểu dữ liệu id của model User (User id là Int)
+  action    String
+  module    String
+  ipAddress String?
+  userAgent String?
+  oldValues Json?
+  newValues Json?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([action])
+  @@map("audit_logs") // <-- THÊM DÒNG NÀY ĐỂ ÉP TÊN BẢNG VIẾT THƯỜNG
+}
+
+enum CategoryStatus {
+  ACTIVE
+  INACTIVE
+}
+
+model Category {
+  id           Int            @id @default(autoincrement())
+  name         String         @db.VarChar(255)
+  description  String?        @db.Text
+  icon         String?        @db.VarChar(255) // Lưu đường dẫn file icon (vd: /uploads/icons/facebook.png)
+  avatar       String?        @db.VarChar(255) // Lưu đường dẫn ảnh đại diện
+  displayOrder Int            @default(0) // Thứ tự hiển thị (số nhỏ xếp trước)
+  status       CategoryStatus @default(ACTIVE)
+
+  // Các trường cấu hình SEO
+  seoTitle       String? @db.VarChar(255)
+  seoDescription String? @db.Text
+  seoKeywords    String? @db.VarChar(255)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Quan hệ: Một danh mục có nhiều sản phẩm
+  products Product[]
+
+  @@map("categories")
+}
+
+enum ProductStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum AccountStatus {
+  AVAILABLE
+  SOLD
+}
+
+model Product {
+  id          Int           @id @default(autoincrement())
+  categoryId  Int
+  name        String        @db.VarChar(255)
+  slug        String        @unique @db.VarChar(255) // Phục vụ SEO (Vd: facebook-via-2018)
+  price       Int           @default(0)
+  description String?       @db.Text // Mô tả dạng HTML text
+  status      ProductStatus @default(ACTIVE)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Quan hệ
+  category     Category      @relation(fields: [categoryId], references: [id])
+  accounts     Account[] // Kho tài khoản thuộc sản phẩm này
+  orders       Order[]
+  orderDetails OrderDetail[]
+
+  @@map("products")
+}
+
+model Account {
+  id          Int           @id @default(autoincrement())
+  productId   Int
+  // Lưu toàn bộ chuỗi thông tin: tenemail|matkhau|emailkhoiphuc|cookie|...
+  accountData String        @db.Text
+  status      AccountStatus @default(AVAILABLE) // AVAILABLE là còn hàng, SOLD là đã bán
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Quan hệ
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  orderId Int? // Liên kết với đơn hàng sau khi bán thành công
+
+  @@map("accounts")
+}
+
+enum OrderStatus {
+  SUCCESS
+  FAILED
+}
+
+model OrderDetail {
+  id          Int      @id @default(autoincrement())
+  orderId     Int
+  productId   Int
+  // Lưu lại bản sao thông tin tài khoản lúc mua để khách hàng xem lại 
+  // (Ví dụ: tenemail|matkhau|cookie...)
+  accountData String   @db.Text
+  createdAt   DateTime @default(now())
+
+  // Quan hệ
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
+
+  @@map("order_details")
+}
