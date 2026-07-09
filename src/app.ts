@@ -14,6 +14,8 @@ import { orderRoutes } from "./features/order/order.routes";
 import { PrismaClient } from "@prisma/client";
 import { notificationRoutes } from "./features/notification/notification.routes";
 
+import { adminUserRoutes } from "./features/user/admin-user.routes";
+
 const app: FastifyInstance = Fastify({
   logger: true // Bật log hệ thống để theo dõi request đầu vào và lỗi
 });
@@ -87,3 +89,5 @@ app.register(inventoryRoutes, { prefix: "/api/v1" });
 app.register(orderRoutes, { prefix: "/api/v1" });
 
 app.register(notificationRoutes, { prefix: "/api/v1" });
+
+app.register(adminUserRoutes, { prefix: "/api/v1" });

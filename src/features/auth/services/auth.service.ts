@@ -79,7 +79,12 @@ export class AuthService {
     }
 
     // Kiểm tra trạng thái tài khoản
-    if (user.status === 'BANNED' || user.status === 'LOCKED') {
+    if (user.status === "BANNED" || user.status === "LOCKED") {
+      await this.createAuthLog(
+        user.id,
+        `LOGIN_ATTEMPT_${user.status}`,
+        context,
+      );
       throw new Error(`AUTH_ACCOUNT_${user.status}`);
     }
 
