@@ -10,7 +10,15 @@ export async function adminUserRoutes(fastify: FastifyInstance) {
   fastify.get("/admin/users", adminGuards, AdminUserController.list);
   fastify.get("/admin/users/:id", adminGuards, AdminUserController.detail);
   fastify.put("/admin/users/:id", adminGuards, AdminUserController.update);
-  
-  fastify.post("/admin/users/:id/reset-password", adminGuards, AdminUserController.changePassword);
-  fastify.post("/admin/users/:id/adjust-balance", adminGuards, AdminUserController.changeBalance);
+
+  fastify.post(
+    "/admin/users/:id/reset-password",
+    adminGuards,
+    AdminUserController.changePassword,
+  );
+  fastify.post(
+    "/admin/users/:id/adjust-balance",
+    adminGuards,
+    AdminUserController.changeBalance,
+  );
 }

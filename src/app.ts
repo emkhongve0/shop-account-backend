@@ -13,7 +13,6 @@ import { inventoryRoutes } from "./features/inventory/inventory.routes";
 import { orderRoutes } from "./features/order/order.routes";
 import { PrismaClient } from "@prisma/client";
 import { notificationRoutes } from "./features/notification/notification.routes";
-
 import { adminUserRoutes } from "./features/user/admin-user.routes";
 
 const app: FastifyInstance = Fastify({
