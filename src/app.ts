@@ -14,12 +14,15 @@ import { orderRoutes } from "./features/order/order.routes";
 import { PrismaClient } from "@prisma/client";
 import { notificationRoutes } from "./features/notification/notification.routes";
 import { adminUserRoutes } from "./features/user/admin-user.routes";
+import { initCleanupJob } from "./jobs/cleanupLog.job";
+
 
 const app: FastifyInstance = Fastify({
   logger: true // Bật log hệ thống để theo dõi request đầu vào và lỗi
 });
 
 const prisma = new PrismaClient();
+
 // Hàm dọn dẹp chạy ngầm, gọi mỗi ngày một lần hoặc khi khởi động server
 async function autoCleanupSoldAccounts() {
   const thirtyDaysAgo = new Date();
@@ -33,6 +36,9 @@ async function autoCleanupSoldAccounts() {
   console.log(`[BẢO MẬT] Đã tự động xóa sạch ${deleted.count} tài khoản đã giao quá hạn 30 ngày.`);
 }
 
+// tự động dọn dẹp các token đã đăng xuất sau 12h
+initCleanupJob();
+
 // ĐĂNG KÝ RATE LIMIT TOÀN CỤC
 app.register(fastifyRateLimit, {
   max: 100,               // Tối đa 100 request
@@ -45,6 +51,7 @@ app.register(fastifyRateLimit, {
     };
   }
 });
+
 
 // Cấu hình bộ dịch dữ liệu Zod cho Fastify
 app.setValidatorCompiler(validatorCompiler);
