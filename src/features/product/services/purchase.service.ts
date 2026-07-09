@@ -1,10 +1,25 @@
-import { PrismaClient, ProductStatus, AccountStatus } from "@prisma/client";
+import {
+  PrismaClient,
+  ProductStatus,
+  AccountStatus,
+  OrderStatus,
+} from "@prisma/client";
 
 const prisma = new PrismaClient();
 
+// Hàm tiện ích sinh mã đơn hàng chuyên nghiệp dạng ORD-YYMMDDXXXX
+function generateOrderCode(): string {
+  const date = new Date();
+  const yy = date.getFullYear().toString().slice(-2);
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  const random = Math.floor(1000 + Math.random() * 9000); // 4 số ngẫu nhiên ngẫu hứng
+  return `ORD-${yy}${mm}${dd}${random}`;
+}
+
 export class PurchaseService {
   /**
-   * HÀM XỬ LÝ MUA HÀNG TỰ ĐỘNG (ACID TRANSACTION)
+   * HÀM XỬ LÝ MUA HÀNG TỰ ĐỘNG (ACID TRANSACTION) - CẬP NHẬT LOGIC ĐƠN HÀNG NÂNG CAO
    */
   static async executePurchase(
     userId: number,
@@ -71,8 +86,7 @@ export class PurchaseService {
           data: { balance: balanceAfter },
         });
 
-        // 5. GHI LỊCH SỬ VÍ (Nếu bảng WalletTransaction của bạn có trường khác, hãy điều chỉnh cho khớp nhé)
-        // Nếu không cần ghi log ví ở đây, bạn có thể comment đoạn này lại
+        // 5. GHI LỊCH SỬ VÍ (Giữ nguyên logic cũ của bạn với type "BUY")
         await tx.walletTransaction.create({
           data: {
             userId: userId,
@@ -85,7 +99,6 @@ export class PurchaseService {
         });
 
         // 5. THÀNH CÔNG: Chuyển RESERVED -> SOLD
-        const accountIds = availableAccounts.map((acc) => acc.id);
         const extractedData = availableAccounts
           .map((acc) => acc.accountData)
           .join("\n");
@@ -95,25 +108,43 @@ export class PurchaseService {
           data: { status: AccountStatus.SOLD },
         });
 
-        // 6. TẠO ĐƠN HÀNG (Lưu vào Model Order cũ của bạn)
+        // 6. TẠO ĐƠN HÀNG (🔥 Cập nhật từ Model cũ sang cấu trúc 3 bảng phân tách mới)
+        const orderCode = generateOrderCode();
+
         const order = await tx.order.create({
           data: {
+            orderCode: orderCode,
             userId: userId,
-            productId: product.id,
-            totalPrice: totalPrice,
-            status: "COMPLETED",
-            accountDetails: extractedData, // Xuất toàn bộ danh sách clone dạng text xuống đây
+            totalAmount: totalPrice,
+            totalQuantity: quantity,
+            status: OrderStatus.COMPLETED,
+            completedAt: new Date(),
+            items: {
+              create: {
+                productId: product.id,
+                productName: product.name, // Khóa cứng tên sản phẩm tại thời điểm mua
+                quantity: quantity,
+                unitPrice: product.price, // Khóa cứng giá sản phẩm tại thời điểm mua
+                totalPrice: totalPrice,
+              },
+            },
+            accounts: {
+              create: availableAccounts.map((acc) => ({
+                accountData: acc.accountData, // Lưu trữ danh sách acc phục vụ bảo mật 30 ngày tự xóa
+              })),
+            },
           },
         });
 
-        // 8. Xuất hàng trả về cho khách
+        // 8. Xuất hàng trả về cho khách (Giữ nguyên cấu trúc trả về, đổi orderId cũ thành orderCode chuyên nghiệp)
         return {
-          orderId: order.id,
+          orderId: order.id, // Vẫn là id của Order (bây giờ là chuỗi UUID)
+          orderCode: order.orderCode, // Bổ sung mã ORD- để hiển thị phía Frontend
           productName: product.name,
           quantity,
           totalPrice,
           balanceAfter,
-          accounts: extractedData, // Trả chuỗi text phân tách bằng dấu xuống dòng để khách copy luôn
+          accounts: extractedData, // Trả chuỗi text phân tách bằng dấu xuống dòng để khách sao chép tiện lợi
         };
       } catch (error) {
         // ❌ HOÀN TÁC (FALLBACK): Nếu có bất kỳ lỗi hệ thống nào xảy ra khi trừ tiền/tạo order

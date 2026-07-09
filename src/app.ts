@@ -10,10 +10,26 @@ import { walletRoutes } from "./features/wallet/wallet.routes";
 import { categoryRoutes } from "./features/category/category.routes";
 import { productRoutes } from "./features/product/product.routes";
 import { inventoryRoutes } from "./features/inventory/inventory.routes";
+import { orderRoutes } from "./features/order/order.routes";
+import { PrismaClient } from "@prisma/client";
 
 const app: FastifyInstance = Fastify({
   logger: true // Bật log hệ thống để theo dõi request đầu vào và lỗi
 });
+
+const prisma = new PrismaClient();
+// Hàm dọn dẹp chạy ngầm, gọi mỗi ngày một lần hoặc khi khởi động server
+async function autoCleanupSoldAccounts() {
+  const thirtyDaysAgo = new Date();
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+  const deleted = await prisma.orderAccount.deleteMany({
+    where: {
+      createdAt: { lt: thirtyDaysAgo } // Tìm các hàng tạo trước 30 ngày trước
+    }
+  });
+  console.log(`[BẢO MẬT] Đã tự động xóa sạch ${deleted.count} tài khoản đã giao quá hạn 30 ngày.`);
+}
 
 // ĐĂNG KÝ RATE LIMIT TOÀN CỤC
 app.register(fastifyRateLimit, {
@@ -66,3 +82,5 @@ app.register(categoryRoutes, { prefix: "/api/v1/categories" });
 app.register(productRoutes, { prefix: "/api/v1" });
 
 app.register(inventoryRoutes, { prefix: "/api/v1" });
+
+app.register(orderRoutes, { prefix: "/api/v1" });

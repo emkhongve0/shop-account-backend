@@ -95,18 +95,47 @@ model Deposit {
 
 // 2. Model Lịch sử mua hàng
 model Order {
-  id             Int           @id @default(autoincrement())
-  userId         Int
-  productId      Int?
-  totalPrice     Int // Tổng tiền đơn hàng
-  status         String        @default("COMPLETED")
-  accountDetails String // Thông tin tài khoản đã mua (Dạng chuỗi hoặc JSON mã hóa)
-  createdAt      DateTime      @default(now())
-  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  product        Product? @relation(fields: [productId], references: [id])
-  orderDetails   OrderDetail[]
+  id            String      @id @default(uuid()) // Chuyển sang UUID
+  orderCode     String      @unique @map("order_code") // Mã đơn hiển thị (VD: ORD-260001)
+  userId        Int         @map("user_id")
+  totalAmount   Int         @map("total_amount")
+  totalQuantity Int         @map("total_quantity")
+  status        OrderStatus @default(PENDING)
+  paymentMethod String      @default("WALLET") @map("payment_method")
+  createdAt     DateTime    @default(now()) @map("created_at")
+  completedAt   DateTime?   @map("completed_at")
+
+  user     User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items    OrderItem[]
+  accounts OrderAccount[]
 
   @@map("orders")
+}
+
+model OrderItem {
+  id          String @id @default(uuid())
+  orderId     String @map("order_id")
+  productId   Int    @map("product_id")
+  productName String @map("product_name") // Lưu tên tại thời điểm mua
+  quantity    Int
+  unitPrice   Int    @map("unit_price") // Giá tại thời điểm mua
+  totalPrice  Int    @map("total_price")
+
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
+
+  @@map("order_items")
+}
+
+model OrderAccount {
+  id          String   @id @default(uuid())
+  orderId     String   @map("order_id")
+  accountData String   @map("account_data") @db.Text // Thông tin clone/via giao cho khách
+  createdAt   DateTime @default(now()) @map("created_at") // Phục vụ cronjob xóa sau 30 ngày
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@map("order_accounts")
 }
 
 // 3. Model Hệ thống Thông báo (Notification)
@@ -185,7 +214,6 @@ enum ProductStatus {
   INACTIVE
 }
 
-
 model Product {
   id          Int           @id @default(autoincrement())
   categoryId  Int
@@ -199,19 +227,18 @@ model Product {
   updatedAt DateTime @updatedAt
 
   // Quan hệ
-  category     Category      @relation(fields: [categoryId], references: [id])
-  accounts     Account[] // Kho tài khoản thuộc sản phẩm này
-  orders       Order[]
-  orderDetails OrderDetail[]
+  category   Category    @relation(fields: [categoryId], references: [id])
+  accounts   Account[] // Kho tài khoản thuộc sản phẩm này
+  orderItems OrderItem[]
 
   @@map("products")
 }
 
 enum AccountStatus {
-  AVAILABLE  // Có thể bán
-  RESERVED   // Đang có người mua (Tạm giữ)
-  SOLD       // Đã bán
-  DISABLED   // Ẩn/Lỗi không bán
+  AVAILABLE // Có thể bán
+  RESERVED // Đang có người mua (Tạm giữ)
+  SOLD // Đã bán
+  DISABLED // Ẩn/Lỗi không bán
 }
 
 model Account {
@@ -220,29 +247,16 @@ model Account {
   accountData String        @db.Text
   status      AccountStatus @default(AVAILABLE) // AVAILABLE là còn hàng, SOLD là đã bán
   orderId     Int?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  product     Product       @relation(fields: [productId], references: [id], onDelete: Cascade)
+
   @@map("accounts")
 }
 
 enum OrderStatus {
-  SUCCESS
+  PENDING
+  COMPLETED
   FAILED
-}
-
-model OrderDetail {
-  id          Int      @id @default(autoincrement())
-  orderId     Int
-  productId   Int
-  // Lưu lại bản sao thông tin tài khoản lúc mua để khách hàng xem lại 
-  // (Ví dụ: tenemail|matkhau|cookie...)
-  accountData String   @db.Text
-  createdAt   DateTime @default(now())
-
-  // Quan hệ
-  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  product Product @relation(fields: [productId], references: [id])
-
-  @@map("order_details")
+  CANCELLED
 }

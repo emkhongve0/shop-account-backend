@@ -4,7 +4,7 @@ const prisma = new PrismaClient();
 
 export class WalletService {
   /**
-   * Lấy số dư hiện tại của User
+   * Lấy số dư hiện tại của User (Giữ nguyên logic gốc)
    */
   static async getBalance(userId: number) {
     const user = await prisma.user.findUnique({
@@ -16,7 +16,7 @@ export class WalletService {
   }
 
   /**
-   * Xem lịch sử biến động số dư (Phân trang)
+   * Xem lịch sử biến động số dư (Phân trang) (Giữ nguyên logic gốc)
    */
   static async getHistory(
     userId: number,
@@ -59,7 +59,7 @@ export class WalletService {
       const user = await tx.user.findUnique({ where: { id: userId } });
       if (!user) throw new Error("Người dùng không tồn tại.");
 
-      // 2. Kiểm tra số dư trước khi mua
+      // 2. Kiểm tra số dư trước khi mua[cite: 2]
       if (user.balance < totalPrice) {
         throw new Error(
           `Không đủ tiền thanh toán. Số dư hiện tại: ${user.balance}, Giá sản phẩm: ${totalPrice}`,
@@ -69,42 +69,32 @@ export class WalletService {
       const balanceBefore = user.balance;
       const balanceAfter = user.balance - totalPrice;
 
-      // 3. Giả định tạo một đơn hàng (Order) trong hệ thống của bạn
-      const order = await tx.order.create({
-        data: {
-          userId,
-          totalPrice,
-          status: "SUCCESS",
-          accountDetails: itemDetails || "No details provided",
-        },
-      });
-      const orderCode = `ORD${order.id}`;
-
-      // 4. Trừ tiền User
+      // 3. Trừ tiền User[cite: 2]
       await tx.user.update({
         where: { id: userId },
         data: { balance: balanceAfter },
       });
 
-      // 5. Ghi nhận nhật ký giao dịch ví
-      await tx.walletTransaction.create({
+      // 4. Ghi nhận nhật ký giao dịch ví[cite: 2]
+      const transaction = await tx.walletTransaction.create({
         data: {
           userId,
           type: TransactionType.BUY,
           amount: totalPrice,
           balanceBefore,
           balanceAfter,
-          referenceId: orderCode,
-          description: `Mua hàng thành công: ${itemDetails}`,
+          // Đã loại bỏ referenceId ăn theo mã Order giả định, ghi nhận trực tiếp mã log ví nếu cần
+          description: `Thanh toán đơn hàng: ${itemDetails}`,
         },
       });
 
-      return { orderCode, balanceAfter };
+      // Trả ra balance sau khi trừ để đồng bộ thông tin ví
+      return { transactionId: transaction.id, balanceAfter };
     });
   }
 
   /**
-   * ADMIN ĐIỀU CHỈNH SỐ DƯ (Cộng / Trừ tiền tay từ trang quản trị)
+   * ADMIN ĐIỀU CHỈNH SỐ DƯ (Cộng / Trừ tiền tay từ trang quản trị) (Giữ nguyên logic gốc)
    */
   static async adminAdjustBalance(
     userId: number,
@@ -131,13 +121,13 @@ export class WalletService {
         balanceAfter -= amount;
       }
 
-      // Cập nhật số dư User
+      // Cập nhật số dư User[cite: 2]
       await tx.user.update({
         where: { id: userId },
         data: { balance: balanceAfter },
       });
 
-      // Ghi lịch sử ví
+      // Ghi lịch sử ví[cite: 2]
       await tx.walletTransaction.create({
         data: {
           userId,

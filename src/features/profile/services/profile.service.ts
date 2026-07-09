@@ -183,14 +183,15 @@ export class ProfileService {
   static async getPurchaseHistory(userId: number) {
     return await prisma.order.findMany({
       where: { userId },
-      orderBy: { createdAt: 'desc' },
+      orderBy: { createdAt: "desc" },
       select: {
         id: true,
-        totalPrice: true,
+        orderCode: true, // ✨ Thêm mã đơn hiển thị (ORD-...) cho đẹp frontend
+        totalAmount: true, //  Đổi thành tên cột mới chuẩn database
+        totalQuantity: true, // ✨ Thêm tổng số lượng nếu cần
         status: true,
-        accountDetails: true,
-        createdAt: true
-      }
+        createdAt: true,
+      },
     });
   }
 
