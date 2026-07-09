@@ -17,13 +17,17 @@ export class AuthService {
   // 2. Tìm kiếm User theo Email
   static async findUserByEmail(email: string) {
     return await prisma.user.findUnique({
-      where: { email: this.normalizeEmail(email) }
+      where: { email: this.normalizeEmail(email) },
     });
   }
 
   // 3. Ghi Nhật ký hệ thống (Log)
-  static async createAuthLog(userId: number, action: string, context: AuthContext) {
-    const device = context.userAgent.includes('Mobile') ? 'Mobile' : 'Desktop';
+  static async createAuthLog(
+    userId: number,
+    action: string,
+    context: AuthContext,
+  ) {
+    const device = context.userAgent.includes("Mobile") ? "Mobile" : "Desktop";
     await prisma.authLog.create({
       data: {
         userId,
@@ -31,19 +35,22 @@ export class AuthService {
         ip: context.ip,
         userAgent: context.userAgent,
         device,
-        country: 'Unknown'
-      }
+        country: "Unknown",
+      },
     });
   }
 
   /**
    * LOGIC ĐĂNG KÝ (REGISTER)
    */
-  static async register(data: { displayName: string; email: string; password: string }, context: AuthContext) {
+  static async register(
+    data: { displayName: string; email: string; password: string },
+    context: AuthContext,
+  ) {
     // Kiểm tra trùng email
     const isEmailUsed = await this.findUserByEmail(data.email);
     if (isEmailUsed) {
-      throw new Error('AUTH_EMAIL_EXISTS');
+      throw new Error("AUTH_EMAIL_EXISTS");
     }
 
     // Băm mật khẩu bằng bcrypt (Salt rounds = 12)
@@ -56,13 +63,13 @@ export class AuthService {
         displayName: data.displayName,
         email: this.normalizeEmail(data.email),
         passwordHash,
-        status: 'PENDING',
-        role: 'USER'
-      }
+        status: "PENDING",
+        role: "USER",
+      },
     });
 
     // Ghi log đăng ký thành công
-    await this.createAuthLog(newUser.id, 'REGISTER', context);
+    await this.createAuthLog(newUser.id, "REGISTER", context);
 
     return newUser;
   }
@@ -72,10 +79,10 @@ export class AuthService {
    */
   static async login(email: string, password: string, context: AuthContext) {
     const user = await this.findUserByEmail(email);
-    
+
     // Kiểm tra tài khoản tồn tại
     if (!user) {
-      throw new Error('AUTH_INVALID_CREDENTIALS');
+      throw new Error("AUTH_INVALID_CREDENTIALS");
     }
 
     // Kiểm tra trạng thái tài khoản
@@ -91,12 +98,12 @@ export class AuthService {
     // So sánh mật khẩu
     const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
     if (!isPasswordValid) {
-      await this.createAuthLog(user.id, 'LOGIN_FAIL', context);
-      throw new Error('AUTH_INVALID_CREDENTIALS');
+      await this.createAuthLog(user.id, "LOGIN_FAIL", context);
+      throw new Error("AUTH_INVALID_CREDENTIALS");
     }
 
     // Đăng nhập thành công -> Ghi log thành công
-    await this.createAuthLog(user.id, 'LOGIN_SUCCESS', context);
+    await this.createAuthLog(user.id, "LOGIN_SUCCESS", context);
 
     return {
       id: user.id,
@@ -110,26 +117,29 @@ export class AuthService {
   /**
    * LOGIC XÁC THỰC EMAIL
    */
-  static async activateUser(userId: number, context: { ip: string; userAgent: string }) {
+  static async activateUser(
+    userId: number,
+    context: { ip: string; userAgent: string },
+  ) {
     // 1. Tìm user xem có tồn tại không
     const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user) {
-      throw new Error('AUTH_USER_NOT_FOUND');
+      throw new Error("AUTH_USER_NOT_FOUND");
     }
 
     // 2. Nếu đã ACTIVE rồi thì không cần làm lại
-    if (user.status === 'ACTIVE') {
+    if (user.status === "ACTIVE") {
       return user;
     }
 
     // 3. Cập nhật trạng thái thành ACTIVE
     const updatedUser = await prisma.user.update({
       where: { id: userId },
-      data: { status: 'ACTIVE' }
+      data: { status: "ACTIVE" },
     });
 
     // 4. Ghi log kích hoạt thành công
-    await this.createAuthLog(user.id, 'VERIFY_EMAIL_SUCCESS', context);
+    await this.createAuthLog(user.id, "VERIFY_EMAIL_SUCCESS", context);
 
     return updatedUser;
   }
@@ -141,11 +151,11 @@ export class AuthService {
     const user = await this.findUserByEmail(email);
     // Nếu không thấy user, ném lỗi để controller xử lý bảo mật
     if (!user) {
-      throw new Error('AUTH_USER_NOT_FOUND');
+      throw new Error("AUTH_USER_NOT_FOUND");
     }
     // Tránh cho phép đổi mật khẩu khi tài khoản bị khóa
-    if (user.status === 'BANNED') {
-      throw new Error('AUTH_ACCOUNT_BANNED');
+    if (user.status === "BANNED") {
+      throw new Error("AUTH_ACCOUNT_BANNED");
     }
     return user;
   }
@@ -153,41 +163,49 @@ export class AuthService {
   /**
    * LOGIC ĐẶT LẠI MẬT KHẨU (RESET PASSWORD)
    */
-  static async resetPassword(userId: number, newPassword: string, context: { ip: string; userAgent: string }) {
+  static async resetPassword(
+    userId: number,
+    newPassword: string,
+    context: { ip: string; userAgent: string },
+  ) {
     const saltRounds = 12;
     const passwordHash = await bcrypt.hash(newPassword, saltRounds);
 
     // Cập nhật mật khẩu mới vào DB
     await prisma.user.update({
       where: { id: userId },
-      data: { passwordHash }
+      data: { passwordHash },
     });
 
     // Ghi log đổi mật khẩu thành công
-    await this.createAuthLog(userId, 'RESET_PASSWORD_SUCCESS', context);
+    await this.createAuthLog(userId, "RESET_PASSWORD_SUCCESS", context);
   }
 
-/**
+  /**
    * CẬP NHẬT LOGIC KIỂM TRA REFRESH TOKEN (Chống dùng lại token đã logout)
    */
-  static async validateUserForTokenRefresh(userId: number, token: string, context: any) {
+  static async validateUserForTokenRefresh(
+    userId: number,
+    token: string,
+    context: any,
+  ) {
     const user = await prisma.user.findUnique({ where: { id: userId } });
-    
-    if (!user) throw new Error('AUTH_USER_NOT_FOUND');
-    if (user.status === 'BANNED' || user.status === 'LOCKED') {
+
+    if (!user) throw new Error("AUTH_USER_NOT_FOUND");
+    if (user.status === "BANNED" || user.status === "LOCKED") {
       throw new Error(`AUTH_ACCOUNT_${user.status}`);
     }
 
     // [BẢO MẬT]: Kiểm tra xem sau lần Login gần nhất, người dùng đã ấn Logout chưa.
     // Tìm log mới nhất của user này liên quan đến Đăng nhập hoặc Đăng xuất
     const lastLog = await prisma.authLog.findFirst({
-      where: { userId, action: { in: ['LOGIN_SUCCESS', 'LOGOUT_SUCCESS'] } },
-      orderBy: { createdAt: 'desc' }
+      where: { userId, action: { in: ["LOGIN_SUCCESS", "LOGOUT_SUCCESS"] } },
+      orderBy: { createdAt: "desc" },
     });
 
     // Nếu hành động gần đây nhất là LOGOUT_SUCCESS, thì token này đã bị khai tử!
-    if (lastLog && lastLog.action === 'LOGOUT_SUCCESS') {
-      throw new Error('AUTH_TOKEN_REVOKED');
+    if (lastLog && lastLog.action === "LOGOUT_SUCCESS") {
+      throw new Error("AUTH_TOKEN_REVOKED");
     }
 
     return user;
@@ -196,8 +214,28 @@ export class AuthService {
   /**
    * LOGIC ĐĂNG XUẤT (LOGOUT)
    */
-  static async logout(userId: number, context: any) {
-    // Ghi nhật ký hệ thống ghi nhận hành động đăng xuất thành công
-    await this.createAuthLog(userId, 'LOGOUT_SUCCESS', context);
+  static async logout(
+    userId: number,
+    tokens: { accessToken: string | null; refreshToken: string },
+    context: any,
+  ) {
+    // Hoạt động log cũ của bạn
+    try {
+      await this.createAuthLog(userId, "LOGOUT_SUCCESS", context);
+    } catch (e) {}
+
+    // Ghi đè bản ghi chặn bằng 30 ký tự cuối của token
+    if (tokens.accessToken) {
+      const tokenTail = tokens.accessToken.slice(-30); // Lấy 30 ký tự cuối
+
+      await prisma.authLog.create({
+        data: {
+          userId: userId,
+          action: "LOGOUT_SUCCESS",
+          userAgent: `REVOKED_${tokenTail}`, // Lưu gọn gàng vào đây
+          ip: context.ip || "0.0.0.0",
+        },
+      });
+    }
   }
 }

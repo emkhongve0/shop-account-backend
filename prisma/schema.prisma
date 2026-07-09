@@ -38,6 +38,14 @@ model User {
   notifications Notification[] // Khớp với model Notification ở dưới
 }
 
+model RevokedToken {
+  id        Int      @id @default(autoincrement())
+  token     String   @unique @db.VarChar(500) // Lưu chuỗi token bị hủy
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("revoked_tokens")
+}
+
 // Định nghĩa Enum cho các loại biến động số dư
 enum TransactionType {
   DEPOSIT // Nạp tiền
