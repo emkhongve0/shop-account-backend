@@ -1,4 +1,5 @@
 import { PrismaClient, TransactionType } from "@prisma/client";
+import { NotificationService } from "../../notification/services/notification.service";
 
 const prisma = new PrismaClient();
 
@@ -94,7 +95,7 @@ export class WalletService {
   }
 
   /**
-   * ADMIN ĐIỀU CHỈNH SỐ DƯ (Cộng / Trừ tiền tay từ trang quản trị) (Giữ nguyên logic gốc)
+   * ADMIN ĐIỀU CHỈNH SỐ DƯ (Cộng / Trừ tiền tay từ trang quản trị)
    */
   static async adminAdjustBalance(
     userId: number,
@@ -104,7 +105,8 @@ export class WalletService {
   ) {
     if (amount <= 0) throw new Error("Số tiền điều chỉnh phải lớn hơn 0.");
 
-    return await prisma.$transaction(async (tx) => {
+    // Sử dụng biến bọc ngoài transaction để hứng dữ liệu trả về trước khi bắn thông báo
+    const result = await prisma.$transaction(async (tx) => {
       const user = await tx.user.findUnique({ where: { id: userId } });
       if (!user) throw new Error("Người dùng không tồn tại.");
 
@@ -121,13 +123,11 @@ export class WalletService {
         balanceAfter -= amount;
       }
 
-      // Cập nhật số dư User[cite: 2]
       await tx.user.update({
         where: { id: userId },
         data: { balance: balanceAfter },
       });
 
-      // Ghi lịch sử ví[cite: 2]
       await tx.walletTransaction.create({
         data: {
           userId,
@@ -148,5 +148,22 @@ export class WalletService {
 
       return { userId, balanceBefore, balanceAfter };
     });
+
+    // 🔥 TÍCH HỢP LUỒNG TỰ ĐỘNG THÔNG BÁO Ở ĐÂY:
+    // Đặt ở NGOÀI khối async (tx) để tránh làm chậm hoặc nghẽn giao dịch database (ACID transaction)
+    if (actionType === "INCREMENT") {
+      try {
+        await NotificationService.sendToUser(
+          userId,
+          "🔔 Số dư thay đổi (Cộng tiền)",
+          `Tài khoản của bạn đã được cộng thêm +${amount.toLocaleString()}đ vào ví. Số dư hiện tại: ${result.balanceAfter.toLocaleString()}đ.`,
+        );
+      } catch (notifError) {
+        console.error("Lỗi gửi thông báo nạp tiền:", notifError);
+        // Không throw lỗi ở đây để tránh làm rollback giao dịch cộng tiền thành công phía trên
+      }
+    }
+
+    return result;
   }
 }

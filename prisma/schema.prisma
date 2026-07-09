@@ -34,6 +34,7 @@ model User {
   authLogs      AuthLog[] // Giữ nguyên dòng cũ của bạn (nếu có)
   deposits      Deposit[] // Khớp với model Deposit ở dưới
   orders        Order[] // Khớp với model Order ở dưới
+  globalNotificationReads GlobalNotificationRead[]
   notifications Notification[] // Khớp với model Notification ở dưới
 }
 
@@ -141,14 +142,32 @@ model OrderAccount {
 // 3. Model Hệ thống Thông báo (Notification)
 model Notification {
   id        Int      @id @default(autoincrement())
-  userId    Int
-  title     String // Tiêu đề thông báo
-  content   String // Nội dung thông báo
-  isRead    Boolean  @default(false) // Trạng thái đã đọc hay chưa
+  userId    Int?     // Đổi thành Int? (cho phép null) để dùng cho thông báo Toàn hệ thống
+  title     String   // Tiêu đề thông báo
+  content   String   @db.Text // Nội dung thông báo
+  isRead    Boolean  @default(false) // Trạng thái đã đọc (chỉ áp dụng cho thông báo cá nhân)
   createdAt DateTime @default(now())
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  //Thêm quan hệ này để lưu trạng thái khi user đọc thông báo Global
+  globalReads GlobalNotificationRead[]
 
   @@map("notifications")
+}
+
+// 👉 Bảng phụ lưu vết User nào đã đọc thông báo Toàn hệ thống nào (Tránh phình to DB)
+model GlobalNotificationRead {
+  id             Int      @id @default(autoincrement())
+  notificationId Int      @map("notification_id")
+  userId         Int      @map("user_id")
+  readAt         DateTime @default(now())
+
+  notification   Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([notificationId, userId])
+  @@map("global_notification_reads")
 }
 
 // 4. Model Quản lý Voucher (Mã giảm giá)
