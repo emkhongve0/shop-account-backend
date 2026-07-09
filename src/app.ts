@@ -9,7 +9,7 @@ import depositRoutes from './features/deposit/deposit.routes';
 import { walletRoutes } from "./features/wallet/wallet.routes";
 import { categoryRoutes } from "./features/category/category.routes";
 import { productRoutes } from "./features/product/product.routes";
-
+import { inventoryRoutes } from "./features/inventory/inventory.routes";
 
 const app: FastifyInstance = Fastify({
   logger: true // Bật log hệ thống để theo dõi request đầu vào và lỗi
@@ -64,3 +64,5 @@ app.register(categoryRoutes, { prefix: "/api/v1/categories" });
 
 // Đăng ký chung mâm v1
 app.register(productRoutes, { prefix: "/api/v1" });
+
+app.register(inventoryRoutes, { prefix: "/api/v1" });

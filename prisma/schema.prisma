@@ -185,10 +185,6 @@ enum ProductStatus {
   INACTIVE
 }
 
-enum AccountStatus {
-  AVAILABLE
-  SOLD
-}
 
 model Product {
   id          Int           @id @default(autoincrement())
@@ -211,20 +207,22 @@ model Product {
   @@map("products")
 }
 
+enum AccountStatus {
+  AVAILABLE  // Có thể bán
+  RESERVED   // Đang có người mua (Tạm giữ)
+  SOLD       // Đã bán
+  DISABLED   // Ẩn/Lỗi không bán
+}
+
 model Account {
   id          Int           @id @default(autoincrement())
   productId   Int
-  // Lưu toàn bộ chuỗi thông tin: tenemail|matkhau|emailkhoiphuc|cookie|...
   accountData String        @db.Text
   status      AccountStatus @default(AVAILABLE) // AVAILABLE là còn hàng, SOLD là đã bán
-
+  orderId     Int?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-
-  // Quan hệ
   product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
-  orderId Int? // Liên kết với đơn hàng sau khi bán thành công
-
   @@map("accounts")
 }
 
