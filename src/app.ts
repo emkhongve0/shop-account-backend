@@ -1,11 +1,14 @@
-import Fastify, { FastifyInstance } from 'fastify';
-import fastifyJwt from '@fastify/jwt';
-import fastifyRateLimit from '@fastify/rate-limit';
-import { serializerCompiler, validatorCompiler } from 'fastify-type-provider-zod';
-import authRoutes from './features/auth/auth.routes';
-import profileRoutes from './features/profile/profile.routes';
-import voucherRoutes from './features/voucher/voucher.routes';
-import depositRoutes from './features/deposit/deposit.routes';
+import Fastify, { FastifyInstance } from "fastify";
+import fastifyJwt from "@fastify/jwt";
+import fastifyRateLimit from "@fastify/rate-limit";
+import {
+  serializerCompiler,
+  validatorCompiler,
+} from "fastify-type-provider-zod";
+import authRoutes from "./features/auth/auth.routes";
+import profileRoutes from "./features/profile/profile.routes";
+import voucherRoutes from "./features/voucher/voucher.routes";
+import depositRoutes from "./features/deposit/deposit.routes";
 import { walletRoutes } from "./features/wallet/wallet.routes";
 import { categoryRoutes } from "./features/category/category.routes";
 import { productRoutes } from "./features/product/product.routes";
@@ -15,10 +18,52 @@ import { PrismaClient } from "@prisma/client";
 import { notificationRoutes } from "./features/notification/notification.routes";
 import { adminUserRoutes } from "./features/user/admin-user.routes";
 import { initCleanupJob } from "./jobs/cleanupLog.job";
-
+import cors from "@fastify/cors";
+import fastifyWebsocket from "@fastify/websocket"; // <-- THÊM MỚI LINE NÀY
 
 const app: FastifyInstance = Fastify({
-  logger: true // Bật log hệ thống để theo dõi request đầu vào và lỗi
+  logger: true,
+});
+
+// 1. Đăng ký Cấu hình CORS bảo mật đa kênh
+app.register(cors, {
+  origin: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  credentials: true,
+});
+
+// 2. Đăng ký Plugin WebSocket của Fastify hệ thống (Quan trọng: Đặt TRƯỚC khi đăng ký các route phân hệ)
+app.register(fastifyWebsocket);
+
+// 3. Khởi tạo một bộ nhớ Map dùng chung toàn cục để lưu trữ Socket của từng User theo ID tài khoản
+export const websocketClients = new Map<number, any>();
+
+// 4. Mở cổng định tuyến sự kiện WebSocket lắng nghe từ Frontend kết nối lên
+app.register(async function (fastify) {
+  fastify.get("/ws/deposit", { websocket: true }, (connection, req) => {
+    const urlParams = new URLSearchParams(req.url.split("?")[1]);
+    const userId = Number(urlParams.get("userId"));
+
+    if (userId && !isNaN(userId)) {
+      // ĐÚNG CHUẨN: Bản thân connection chính là socket stream, hoặc lấy qua connection.socket tùy phiên bản.
+      // Giải pháp an toàn nhất: Thử lấy connection.socket trước, nếu không có thì dùng chính connection
+      const socket = connection.socket ? connection.socket : connection;
+
+      websocketClients.set(userId, socket);
+      fastify.log.info(
+        `🔌 [WEBSOCKET] Tài khoản ID: ${userId} đã mở kết nối thành công.`,
+      );
+
+      // FIX LỖI (reading 'on'): Đăng ký sự kiện close trên đối tượng socket vừa tìm được
+      socket.on("close", () => {
+        websocketClients.delete(userId);
+        fastify.log.info(
+          `❌ [WEBSOCKET] Tài khoản ID: ${userId} đã ngắt kết nối.`,
+        );
+      });
+    }
+  });
 });
 
 const prisma = new PrismaClient();
@@ -30,10 +75,12 @@ async function autoCleanupSoldAccounts() {
 
   const deleted = await prisma.orderAccount.deleteMany({
     where: {
-      createdAt: { lt: thirtyDaysAgo } // Tìm các hàng tạo trước 30 ngày trước
-    }
+      createdAt: { lt: thirtyDaysAgo },
+    },
   });
-  console.log(`[BẢO MẬT] Đã tự động xóa sạch ${deleted.count} tài khoản đã giao quá hạn 30 ngày.`);
+  console.log(
+    `[BẢO MẬT] Đã tự động xóa sạch ${deleted.count} tài khoản đã giao quá hạn 30 ngày.`,
+  );
 }
 
 // tự động dọn dẹp các token đã đăng xuất sau 12h
@@ -41,59 +88,39 @@ initCleanupJob();
 
 // ĐĂNG KÝ RATE LIMIT TOÀN CỤC
 app.register(fastifyRateLimit, {
-  max: 100,               // Tối đa 100 request
-  timeWindow: '1 minute', // Trong vòng 1 phút
+  max: 100,
+  timeWindow: "1 minute",
   errorResponseBuilder: (request, context) => {
     return {
       success: false,
       message: `Bạn đang thao tác quá nhanh. Vui lòng thử lại sau ${context.after}.`,
-      statusCode: 429
+      statusCode: 429,
     };
-  }
+  },
 });
 
-
-// Cấu hình bộ dịch dữ liệu Zod cho Fastify
 app.setValidatorCompiler(validatorCompiler);
 app.setSerializerCompiler(serializerCompiler);
 
-// Kích hoạt Rate Limit toàn cục (để global: false vì ta tự cấu hình riêng theo từng route)
 app.register(fastifyRateLimit, {
-  global: false
+  global: false,
 });
 
-// Cấu hình JWT mã hóa token
 app.register(fastifyJwt, {
-  secret: process.env.JWT_SECRET || 'sieubao_mat_key_123_!'
+  secret: process.env.JWT_SECRET || "sieubao_mat_key_123_!",
 });
 
-// Đăng ký tính năng Auth với tiền tố URL: /api/v1/auth
-app.register(authRoutes, { prefix: '/api/v1/auth' });
+// Đăng ký các phân hệ tuyến đường hệ thống
+app.register(authRoutes, { prefix: "/api/v1/auth" });
+app.register(profileRoutes, { prefix: "/api/v1/profile" });
+app.register(voucherRoutes, { prefix: "/api/v1/vouchers" });
+app.register(depositRoutes, { prefix: "/api/v1/deposits" }); // Phân hệ nạp tiền
+app.register(walletRoutes, { prefix: "/api/v1/wallet" });
+app.register(categoryRoutes, { prefix: "/api/v1/categories" });
+app.register(productRoutes, { prefix: "/api/v1" });
+app.register(inventoryRoutes, { prefix: "/api/v1" });
+app.register(orderRoutes, { prefix: "/api/v1" });
+app.register(notificationRoutes, { prefix: "/api/v1" });
+app.register(adminUserRoutes, { prefix: "/api/v1" });
 
 export default app;
-
-// ĐĂNG KÝ PHÂN HỆ PROFILE TẠI ĐÂY:
-app.register(profileRoutes, { prefix: '/api/v1/profile' });
-
-// ĐĂNG KÝ PHÂN HỆ VOUCHER
-app.register(voucherRoutes, { prefix: '/api/v1/vouchers' });
-
-// ĐĂNG KÝ PHÂN HỆ NẠP TIỀN TỰ ĐỘNG
-app.register(depositRoutes, { prefix: '/api/v1/deposits' });
-
-// Đăng ký bên dưới phân đoạn chứa các route khác (như authRoutes, depositRoutes)
-app.register(walletRoutes, { prefix: "/api/v1/wallet" });
-
-// Đăng ký chung mâm v1 với ví tiền và nạp tiền
-app.register(categoryRoutes, { prefix: "/api/v1/categories" });
-
-// Đăng ký chung mâm v1
-app.register(productRoutes, { prefix: "/api/v1" });
-
-app.register(inventoryRoutes, { prefix: "/api/v1" });
-
-app.register(orderRoutes, { prefix: "/api/v1" });
-
-app.register(notificationRoutes, { prefix: "/api/v1" });
-
-app.register(adminUserRoutes, { prefix: "/api/v1" });

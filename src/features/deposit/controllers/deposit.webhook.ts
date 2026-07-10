@@ -1,6 +1,7 @@
 import { FastifyReply, FastifyRequest } from "fastify";
 import { DepositService } from "../services/deposit.service";
 import { AuditLogService } from "../../audit-log/services/audit-log.service";
+import { websocketClients } from "../../../app"; // <-- THÊM MỚI: Import Map lưu giữ kết nối từ file app.ts
 
 interface EmailWebhookBody {
   bankTxId: string; // Mã giao dịch từ email (Ví dụ: "2026070800003988504")
@@ -51,6 +52,33 @@ export const emailWebhookHandler = async (
         depositCode: result.depositCode,
       },
     });
+
+    // 4. THÊM MỚI: Đẩy thông tin real-time báo thành công ngay lập tức sang Frontend qua WebSocket
+    try {
+      const userSocket = websocketClients.get(result.userId);
+
+      // Nếu trạng thái kết nối socket đang mở (readyState === 1)
+      if (userSocket && userSocket.readyState === 1) {
+        userSocket.send(
+          JSON.stringify({
+            event: "DEPOSIT_SUCCESS",
+            data: {
+              status: "SUCCESS",
+              // SỬA TẠI ĐÂY: Thay newBalance bằng balanceAfter theo đúng Type của Service trả về
+              newBalance: result.balanceAfter || 0,
+            },
+          }),
+        );
+        request.server.log.info(
+          `⚡ [WEBSOCKET] Đã đẩy thông báo nạp thành công real-time tới User ID: ${result.userId}`,
+        );
+      }
+    } catch (wsError) {
+      request.server.log.error(
+        wsError,
+        "Lỗi xảy ra khi bắn tín hiệu WebSocket.",
+      );
+    }
 
     return reply.status(200).send({
       success: true,
