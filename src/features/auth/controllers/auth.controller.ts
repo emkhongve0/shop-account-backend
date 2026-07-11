@@ -71,7 +71,7 @@ export const loginHandler = async (
 
     // Tạo cặp mã Access Token và Refresh Token
     const payload = { userId: user.id, email: user.email, role: user.role };
-    const accessToken = request.server.jwt.sign(payload, { expiresIn: "30m" });
+    const accessToken = request.server.jwt.sign(payload, { expiresIn: "1m" });
     const refreshToken = request.server.jwt.sign(payload, { expiresIn: "7d" });
 
     return reply.status(200).send({
@@ -80,6 +80,13 @@ export const loginHandler = async (
       data: { accessToken, refreshToken, user },
     });
   } catch (error: any) {
+    if (error.message === "AUTH_ACCOUNT_UNVERIFIED") {
+      return reply.status(403).send({
+        success: false,
+        message:
+          "Tài khoản của bạn chưa kích hoạt email. Vui lòng kiểm tra hộp thư để xác thực trước khi đăng nhập.",
+      });
+    }
     if (error.message === "AUTH_INVALID_CREDENTIALS") {
       return reply
         .status(400)
@@ -276,27 +283,30 @@ export const refreshTokenHandler = async (
       userAgent: request.headers["user-agent"] || "Unknown",
     };
 
-    // 1. Giải mã mã hóa hình thức
-    let decoded: { userId: number; email: string };
+    // 1. Giải mã kiểm tra chữ ký và hạn dùng cơ bản
+    let decoded: { userId: number; email: string; role: string };
     try {
       decoded = request.server.jwt.verify(refreshToken);
     } catch (jwtError) {
       return reply
         .status(401)
-        .send({ success: false, message: "Phiên đăng nhập không hợp lệ." });
+        .send({
+          success: false,
+          message: "Phiên đăng nhập không hợp lệ hoặc đã hết hạn.",
+        });
     }
 
-    // 2. Kiểm tra trạng thái và token đã bị hủy chưa (Truyền thêm refreshToken vào hàm)
+    // 2. Kiểm tra trạng thái user và token đã bị hủy ở DB chưa
     const user = await AuthService.validateUserForTokenRefresh(
       decoded.userId,
       refreshToken,
       context,
     );
 
-    // 3. Cấp Access Token mới
-    const payload = { userId: user.id, email: user.email };
+    // 3. Cấp Access Token mới - ĐỒNG NHẤT PAYLOAD VỚI LOGIN (Bao gồm cả role)
+    const payload = { userId: user.id, email: user.email, role: user.role };
     const newAccessToken = request.server.jwt.sign(payload, {
-      expiresIn: "1d",
+      expiresIn: "1m", // Thời gian ngắn hợp lý cho Access Token
     });
 
     return reply.status(200).send({
@@ -305,7 +315,6 @@ export const refreshTokenHandler = async (
       data: { accessToken: newAccessToken },
     });
   } catch (error: any) {
-    // Bắt lỗi token đã bị hủy do đăng xuất
     if (error.message === "AUTH_TOKEN_REVOKED") {
       return reply.status(401).send({
         success: false,
@@ -320,7 +329,10 @@ export const refreshTokenHandler = async (
     ) {
       return reply
         .status(403)
-        .send({ success: false, message: "Tài khoản không đủ điều kiện." });
+        .send({
+          success: false,
+          message: "Tài khoản không đủ điều kiện hoặc bị khóa.",
+        });
     }
 
     request.server.log.error(error);

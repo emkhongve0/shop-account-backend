@@ -85,7 +85,13 @@ export class AuthService {
       throw new Error("AUTH_INVALID_CREDENTIALS");
     }
 
-    // Kiểm tra trạng thái tài khoản
+    // 2. BỔ SUNG: Chặn đăng nhập nếu tài khoản ở trạng thái PENDING
+    if (user.status === "PENDING") {
+      await this.createAuthLog(user.id, "LOGIN_ATTEMPT_PENDING", context);
+      throw new Error("AUTH_ACCOUNT_UNVERIFIED");
+    }
+
+    // 3. Kiểm tra trạng thái tài khoản bị khóa/cấm khác
     if (user.status === "BANNED" || user.status === "LOCKED") {
       await this.createAuthLog(
         user.id,
@@ -194,6 +200,11 @@ export class AuthService {
     if (!user) throw new Error("AUTH_USER_NOT_FOUND");
     if (user.status === "BANNED" || user.status === "LOCKED") {
       throw new Error(`AUTH_ACCOUNT_${user.status}`);
+    }
+
+    if (user.status === "PENDING") {
+      // Thay "PENDING" bằng giá trị enum chính xác trong DB của bạn
+      throw new Error("AUTH_ACCOUNT_UNVERIFIED");
     }
 
     // [BẢO MẬT]: Kiểm tra xem sau lần Login gần nhất, người dùng đã ấn Logout chưa.
