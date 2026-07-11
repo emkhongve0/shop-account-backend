@@ -1,12 +1,12 @@
 import { FastifyReply, FastifyRequest } from "fastify";
 import { DepositService } from "../services/deposit.service";
 import { AuditLogService } from "../../audit-log/services/audit-log.service";
-import { websocketClients } from "../../../app"; // <-- THÊM MỚI: Import Map lưu giữ kết nối từ file app.ts
+import { websocketClients } from "../../../app";
 
 interface EmailWebhookBody {
-  bankTxId: string; // Mã giao dịch từ email (Ví dụ: "2026070800003988504")
-  amount: number; // Số tiền ghi có (Ví dụ: 2000)
-  transactionRemark: string; // Nội dung chuyển khoản chứa mã DEP-XXXXXX
+  bankTxId: string; // Mã giao dịch từ ngân hàng
+  amount: number; // Số tiền thực tế ghi có từ Email
+  transactionRemark: string; // Nội dung chuyển khoản (chứa mã nạp tiền)
 }
 
 export const emailWebhookHandler = async (
@@ -32,14 +32,14 @@ export const emailWebhookHandler = async (
         .send({ success: false, message: "Thiếu dữ liệu giao dịch." });
     }
 
-    // 2. Gọi Service xử lý đối soát, chạy Prisma Transaction và cộng tiền
+    // 2. Xử lý đối soát, chạy Prisma Transaction và cộng tiền vào Ví tài khoản
     const result = await DepositService.processAutoDeposit(
       bankTxId,
       amount,
       transactionRemark,
     );
 
-    // 3. Ghi Audit Log để quản trị viên dễ dàng theo dõi dòng tiền nạp tự động
+    // 3. Ghi Audit Log theo dõi dòng tiền nạp tự động hệ thống
     await AuditLogService.createLog({
       userId: result.userId,
       module: "DEPOSIT_AUTOMATION",
@@ -53,30 +53,32 @@ export const emailWebhookHandler = async (
       },
     });
 
-    // 4. THÊM MỚI: Đẩy thông tin real-time báo thành công ngay lập tức sang Frontend qua WebSocket
+    // 4. CẬP NHẬT: Đẩy gói tin chứa SỐ TIỀN THẬT và SỐ DƯ THẬT về Frontend qua WebSocket
     try {
       const userSocket = websocketClients.get(result.userId);
 
-      // Nếu trạng thái kết nối socket đang mở (readyState === 1)
       if (userSocket && userSocket.readyState === 1) {
+        // 1 là trạng thái OPEN
         userSocket.send(
           JSON.stringify({
             event: "DEPOSIT_SUCCESS",
             data: {
               status: "SUCCESS",
-              // SỬA TẠI ĐÂY: Thay newBalance bằng balanceAfter theo đúng Type của Service trả về
+              // Truyền số tiền thực tế cào được từ Email ngân hàng (Ví dụ: 2000)
+              amountReceived: amount,
+              // Truyền số dư ví thật sau khi đã cộng thành công trong Database
               newBalance: result.balanceAfter || 0,
             },
           }),
         );
         request.server.log.info(
-          `⚡ [WEBSOCKET] Đã đẩy thông báo nạp thành công real-time tới User ID: ${result.userId}`,
+          `⚡ [WEBSOCKET] Đã truyền dữ liệu nạp thực tế (+${amount}đ, Số dư mới: ${result.balanceAfter}đ) tới User ID: ${result.userId}`,
         );
       }
     } catch (wsError) {
       request.server.log.error(
         wsError,
-        "Lỗi xảy ra khi bắn tín hiệu WebSocket.",
+        "Gặp sự cố khi bắn tín hiệu WebSocket.",
       );
     }
 
@@ -86,8 +88,6 @@ export const emailWebhookHandler = async (
     });
   } catch (error: any) {
     request.server.log.error(error);
-
-    // Trả về lỗi chi tiết từ Service (Trùng mã, Hết hạn, Sai mã...) để script log lại
     return reply.status(400).send({
       success: false,
       message: error.message || "Lỗi xử lý đối soát giao dịch.",

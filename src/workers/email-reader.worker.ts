@@ -39,33 +39,51 @@ async function sendToBackend(bankTxId: string, amount: number, remark: string) {
 // 3. Hàm phân tích cú pháp Email sau khi nhận được
 export function parseEmailBody(text: string) {
   try {
-    // Tối ưu Regex để loại bỏ khoảng trắng phức tạp (\s+)
-    const txMatch = text.match(
-      /(?:Mã giao dịch|Transaction code):\s*([0-9]+)/i,
+    // Loại bỏ bớt khoảng trắng thừa để chuẩn hóa chuỗi dữ liệu đầu vào
+    const cleanText = text.replace(/[ \t]+/g, " ");
+
+    // 1. Tìm mã giao dịch (Bao quát trường hợp chữ 'code' bị đẩy xuống dòng tiếp theo)
+    const txMatch = cleanText.match(
+      /(?:Mã giao dịch\/\s*Transaction[\s\n]*code):\s*([0-9]+)/i,
     );
-    const amountMatch = text.match(
-      /(?:Số tiền ghi có|Credit Amount):\s*([0-9.,]+)/i,
+
+    // 2. Tìm số tiền ghi có (Bao quát trường hợp chữ 'Amount' bị đẩy xuống dòng tiếp theo)
+    const amountMatch = cleanText.match(
+      /(?:Số tiền ghi có\/Credit[\s\n]*Amount):\s*([0-9.,]+)/i,
     );
-    const remarkMatch = text.match(
-      /(?:Nội dung giao dịch|Transaction remark):\s*([^\n\r]+)/i,
+
+    // 3. Tìm nội dung giao dịch (Quét đoạn text dài phía sau dấu hai chấm cho đến khi gặp dòng chữ "Nếu quý khách cần...")
+    const remarkMatch = cleanText.match(
+      /(?:Nội dung giao dịch\/Transaction[\s\n]*remark):\s*([\s\S]*?)(?=Nếu quý khách cần|Please contact)/i,
     );
 
     if (txMatch && amountMatch && remarkMatch) {
       const bankTxId = txMatch[1].trim();
+      // Chuyển chuỗi định dạng "2,000" thành số nguyên 2000
       const amount = parseInt(amountMatch[1].replace(/[.,]/g, "").trim(), 10);
-      const remark = remarkMatch[1].trim();
+
+      // Làm sạch chuỗi nội dung chuyển khoản (loại bỏ xuống dòng dư thừa)
+      const remark = remarkMatch[1].replace(/[\r\n]+/g, " ").trim();
 
       console.log(`----------------------------------------`);
-      console.log(`[Phát hiện giao dịch]:`);
-      console.log(`- Mã GD Ngân hàng: ${bankTxId}`);
-      console.log(`- Số tiền nhận: ${amount}đ`);
-      console.log(`- Nội dung: ${remark}`);
+      console.log(`[Phát hiện giao dịch thành công]:`);
+      console.log(`- Mã GD Ngân hàng  : ${bankTxId}`);
+      console.log(`- Số tiền nhận     : ${amount.toLocaleString("vi-VN")}đ`);
+      console.log(`- Nội dung (Memo)  : ${remark}`);
+      console.log(`----------------------------------------`);
 
+      // Gửi sang Backend xử lý cộng tiền
       sendToBackend(bankTxId, amount, remark);
     } else {
       console.log(
-        "⚠️ [Parser Notice]: Email chứa từ khóa nhưng không bóc tách đủ 3 trường thông tin (TxId, Amount, Remark).",
+        "⚠️ [Parser Notice]: Email chứa từ khóa nhưng không bóc tách đủ 3 trường thông tin.",
       );
+      // Log chi tiết dữ liệu nhận diện lỗi để kiểm tra cấu trúc lệch pha ở đâu
+      console.log("[Kết quả check nhanh]:", {
+        hasTxId: !!txMatch,
+        hasAmount: !!amountMatch,
+        hasRemark: !!remarkMatch,
+      });
     }
   } catch (err) {
     console.error("[Parser Error]: Lỗi bóc tách dữ liệu chữ", err);

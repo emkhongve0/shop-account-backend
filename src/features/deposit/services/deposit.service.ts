@@ -1,14 +1,13 @@
 // src/features/deposit/services/deposit.service.ts
-import { PrismaClient, TransactionType } from "@prisma/client";
+import { PrismaClient } from "@prisma/client";
 import * as crypto from "crypto";
 
 const prisma = new PrismaClient();
 
-// Đọc cấu hình từ file .env
 const BANK_CONFIG = {
-  bankBin: process.env.BANK_BIN as string, // Ví dụ: 970446
-  accountNumber: process.env.BANK_ACCOUNT_NUMBER as string, // Ví dụ: 1234567890
-  accountName: process.env.BANK_ACCOUNT_NAME as string, // Ví dụ: NGUYEN XUAN THINH
+  bankBin: process.env.BANK_BIN as string,
+  accountNumber: process.env.BANK_ACCOUNT_NUMBER as string,
+  accountName: process.env.BANK_ACCOUNT_NAME as string,
 };
 
 if (
@@ -23,58 +22,30 @@ if (
 
 export class DepositService {
   /**
-   * Tạo mã nạp ngẫu nhiên dạng DEPXXXXXX
+   * Sinh mã nạp dựa trên ID của User để đảm bảo tính định danh duy nhất, không bao giờ trùng lặp
+   * Ví dụ: User ID = 5 -> DEP000005. Đảm bảo độ dài chuỗi cố định và dễ parse regex.
    */
-  private static generateDepositCode(): string {
-    const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-    let code = "";
-    for (let i = 0; i < 6; i++) {
-      code += chars.charAt(crypto.randomInt(0, chars.length));
-    }
-    return `DEP${code}`;
+  public static generateUserDepositCode(userId: number): string {
+    const pad = String(userId).padStart(6, "0");
+    return `DEP${pad}`;
   }
 
   /**
-   * USER BẤM NẠP TIỀN -> TẠO REQUEST PENDING & SINH LINK VIETQR
+   * USER LẤY MÃ NẠP ĐỊNH DANH -> KHÔNG TẠO BẢN GHI TRƯỚC, CHỈ TRẢ VỀ QR LÀM SẴN
    */
   static async createDepositRequest(userId: number, method: string) {
-    let depositCode = this.generateDepositCode();
+    // Sinh mã cố định gắn liền với tài khoản của User suốt đời
+    const depositCode = this.generateUserDepositCode(userId);
 
-    let isExist = await prisma.deposit.findUnique({
-      where: { description: depositCode },
-    });
-    while (isExist) {
-      depositCode = this.generateDepositCode();
-      isExist = await prisma.deposit.findUnique({
-        where: { description: depositCode },
-      });
-    }
-
-    const expiredAt = new Date(Date.now() + 10 * 60 * 1000);
-
-    const depositRequest = await prisma.deposit.create({
-      data: {
-        userId,
-        method,
-        description: depositCode,
-        status: "PENDING",
-        expiredAt,
-      },
-    });
-
-    // Tạo link ảnh VietQR động theo chuẩn API VietQR.io
-    // Định dạng: https://img.vietqr.io/image/<MÃ_BIN>-<SỐ_TÀI_KHOẢN>-<MẪU_GIAO_DIỆN>.png?addInfo=<NỘI_DUNG>&accountName=<TÊN_CHỦ_TK>
-    // Mẫu ảnh sử dụng: 'compact2' (Mẫu QR tối giản kèm logo ngân hàng, rất đẹp và gọn)
     const encodeAccountName = encodeURIComponent(BANK_CONFIG.accountName);
     const encodeMemo = encodeURIComponent(depositCode);
 
     const qrCodeTemplateUrl = `https://img.vietqr.io/image/${BANK_CONFIG.bankBin}-${BANK_CONFIG.accountNumber}-compact2.png?addInfo=${encodeMemo}&accountName=${encodeAccountName}`;
 
     return {
-      id: depositRequest.id,
-      description: depositRequest.description,
-      expiredAt: depositRequest.expiredAt,
-      // Trả về dạng Link ảnh URL thay vì chuỗi Base64 dài dòng
+      id: userId, // Định danh theo ID User
+      description: depositCode,
+      expiredAt: null, // Không bao giờ hết hạn
       qrCodeUrl: qrCodeTemplateUrl,
       manualPaymentInfo: {
         bankBin: BANK_CONFIG.bankBin,
@@ -85,16 +56,15 @@ export class DepositService {
     };
   }
 
-
   /**
-   * HÀM ĐỐI SOÁT VÀ CỘNG TIỀN TỰ ĐỘNG (ĐÃ CẬP NHẬT LỊCH SỬ VÍ)
+   * HÀM ĐỐI SOÁT: CHỈ KHI CÓ TIỀN VÀO MỚI TẠO BẢN GHI LỊCH SỬ VỚI TRẠNG THÁI SUCCESS
    */
   static async processAutoDeposit(
     bankTxId: string,
     amount: number,
     emailContent: string,
   ) {
-    const match = emailContent.match(/(DEP[A-Z0-9]{6})/i);
+    const match = emailContent.match(/(DEP[0-9]{6})/i);
     if (!match) {
       throw new Error(
         "Mã nội dung nạp tiền không hợp lệ hoặc không có trong email.",
@@ -102,76 +72,64 @@ export class DepositService {
     }
     const depositCode = match[0].toUpperCase();
 
+    // Trích xuất ngược lại User ID từ mã định danh (Ví dụ: DEP000005 -> 5)
+    const userId = parseInt(depositCode.replace("DEP", ""), 10);
+
     return await prisma.$transaction(async (tx) => {
+      // 1. Kiểm tra chống trùng lặp dựa trên Mã giao dịch Ngân hàng (bankTxId độc nhất)
       const duplicateTx = await tx.deposit.findUnique({ where: { bankTxId } });
       if (duplicateTx) {
         throw new Error("Giao dịch ngân hàng này đã được xử lý trước đó.");
       }
 
-      const depositRequest = await tx.deposit.findUnique({
-        where: { description: depositCode },
-      });
-      if (!depositRequest) {
-        throw new Error(
-          "Không tìm thấy yêu cầu nạp tiền tương ứng với mã này.",
-        );
-      }
-
-      if (depositRequest.status !== "PENDING") {
-        throw new Error(
-          `Yêu cầu nạp tiền này đã ở trạng thái: ${depositRequest.status}`,
-        );
-      }
-
-      if (new Date() > new Date(depositRequest.expiredAt)) {
-        await tx.deposit.update({
-          where: { id: depositRequest.id },
-          data: { status: "EXPIRED" },
-        });
-        throw new Error("Yêu cầu nạp tiền đã quá thời gian 10 phút quy định.");
-      }
-
-      // 1. Cập nhật trạng thái đơn nạp tiền
-      await tx.deposit.update({
-        where: { id: depositRequest.id },
-        data: {
-          status: "SUCCESS",
-          amount: amount,
-          bankTxId: bankTxId,
-        },
-      });
-
-      // 2. Khóa và lấy thông tin user hiện tại để tính toán số dư chính xác
-      const user = await tx.user.findUnique({
-        where: { id: depositRequest.userId },
-      });
+      // Kiểm tra xem User có tồn tại thực tế trong hệ thống không
+      const user = await tx.user.findUnique({ where: { id: userId } });
       if (!user) {
         throw new Error("Người dùng không tồn tại trong hệ thống.");
       }
+
+      // 2. CHỈ TẠO BẢN GHI LỊCH SỬ NẠP KHI THÀNH CÔNG (Mặc định status = SUCCESS)
+      const newDeposit = await tx.deposit.create({
+        data: {
+          userId: user.id,
+          amount: amount,
+          method: "BANKING",
+          status: "SUCCESS", // Trạng thái duy nhất, không có pending/expired
+          description: `${depositCode}-${bankTxId}`, // Ghép thêm mã Tx để tránh lỗi trùng @unique trường description cũ
+          bankTxId: bankTxId,
+          expiredAt: new Date(), // Không giới hạn, lấy thời gian thực hiện làm mốc
+        },
+      });
 
       const balanceBefore = user.balance;
       const balanceAfter = user.balance + amount;
 
       // 3. Cập nhật số dư mới cho User
       await tx.user.update({
-        where: { id: depositRequest.userId },
+        where: { id: user.id },
         data: { balance: balanceAfter },
       });
 
       // 4. Ghi nhận lịch sử biến động số dư (Wallet Transaction)
       await tx.walletTransaction.create({
         data: {
-          userId: depositRequest.userId,
-          type: "DEPOSIT", // Loại giao dịch nạp tiền
+          userId: user.id,
+          type: "DEPOSIT",
           amount: amount,
           balanceBefore,
           balanceAfter,
           referenceId: depositCode,
-          description: `Nạp tiền tự động qua ngân hàng (Mã GD: ${bankTxId})`,
+          description: `Nạp tiền tự động thành công qua QR định danh (Mã GD: ${bankTxId})`,
         },
       });
 
-      return { userId: depositRequest.userId, depositCode, amount, balanceAfter };
+      return {
+        id: newDeposit.id,
+        userId: user.id,
+        depositCode,
+        amount,
+        balanceAfter,
+      };
     });
   }
 }

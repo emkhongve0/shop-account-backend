@@ -60,7 +60,7 @@ export class WalletService {
       const user = await tx.user.findUnique({ where: { id: userId } });
       if (!user) throw new Error("Người dùng không tồn tại.");
 
-      // 2. Kiểm tra số dư trước khi mua[cite: 2]
+      // 2. Kiểm tra số dư trước khi mua
       if (user.balance < totalPrice) {
         throw new Error(
           `Không đủ tiền thanh toán. Số dư hiện tại: ${user.balance}, Giá sản phẩm: ${totalPrice}`,
@@ -70,13 +70,13 @@ export class WalletService {
       const balanceBefore = user.balance;
       const balanceAfter = user.balance - totalPrice;
 
-      // 3. Trừ tiền User[cite: 2]
+      // 3. Trừ tiền User
       await tx.user.update({
         where: { id: userId },
         data: { balance: balanceAfter },
       });
 
-      // 4. Ghi nhận nhật ký giao dịch ví[cite: 2]
+      // 4. Ghi nhận nhật ký giao dịch ví
       const transaction = await tx.walletTransaction.create({
         data: {
           userId,
