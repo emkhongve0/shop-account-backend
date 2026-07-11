@@ -71,7 +71,7 @@ export const loginHandler = async (
 
     // Tạo cặp mã Access Token và Refresh Token
     const payload = { userId: user.id, email: user.email, role: user.role };
-    const accessToken = request.server.jwt.sign(payload, { expiresIn: "1m" });
+    const accessToken = request.server.jwt.sign(payload, { expiresIn: "30m" });
     const refreshToken = request.server.jwt.sign(payload, { expiresIn: "7d" });
 
     return reply.status(200).send({
@@ -306,7 +306,7 @@ export const refreshTokenHandler = async (
     // 3. Cấp Access Token mới - ĐỒNG NHẤT PAYLOAD VỚI LOGIN (Bao gồm cả role)
     const payload = { userId: user.id, email: user.email, role: user.role };
     const newAccessToken = request.server.jwt.sign(payload, {
-      expiresIn: "1m", // Thời gian ngắn hợp lý cho Access Token
+      expiresIn: "30m", // Thời gian ngắn hợp lý cho Access Token
     });
 
     return reply.status(200).send({

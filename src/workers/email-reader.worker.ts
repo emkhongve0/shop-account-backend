@@ -1,240 +1,283 @@
-import Imap from "node-imap";
-import { simpleParser } from "mailparser";
+import { google } from "googleapis";
 import { convert } from "html-to-text";
+import express from "express";
+import * as dotenv from "dotenv";
+import path from "path";
 
-// 1. Cấu hình thông tin kết nối Gmail và API Webhook
-const IMAP_CONFIG = {
-  user: "nguyenxuanthinh22026@gmail.com",
-  password: "ltnw lqnh qcwp iqlc", // Mật khẩu ứng dụng vừa tạo ở Bước 1
-  host: "imap.gmail.com",
-  port: 993,
-  tls: true,
-  tlsOptions: { rejectUnauthorized: false },
+// Nạp file .env ở thư mục gốc
+dotenv.config({ path: path.resolve(__dirname, "../../../env") });
+
+// Hàm tiện ích để tự động xóa dấu nháy kép "" thừa nếu có
+const cleanEnv = (key: string, defaultValue: string = ""): string => {
+  const value = process.env[key];
+  if (!value) return defaultValue;
+  return value.replace(/^"|"$/g, "").trim(); // Gọt sạch dấu nháy kép ở đầu và cuối chuỗi
 };
+// =========================================================================
+// 1. CẤU HÌNH HẰNG SỐ HỆ THỐNG (Đọc an toàn từ .env có dấu nháy)
+// =========================================================================
+const WEBHOOK_URL = cleanEnv(
+  "WEBHOOK_URL",
+  "http://127.0.0.1:3000/api/v1/deposits/webhook-email",
+);
+const WEBHOOK_SECRET = cleanEnv("WEBHOOK_SECRET");
+const GOOGLE_PROJECT_ID = cleanEnv(
+  "GOOGLE_PROJECT_ID",
+  "diesel-rhythm-502111-t8",
+);
+const PUB_SUB_TOPIC =
+  cleanEnv("PUB_SUB_TOPIC") ||
+  `projects/${GOOGLE_PROJECT_ID}/topics/gmail-bank-webhook`;
+const GMAIL_REFRESH_TOKEN = cleanEnv("GMAIL_REFRESH_TOKEN");
 
-const WEBHOOK_URL = "http://127.0.0.1:3000/api/v1/deposits/webhook-email";
-const WEBHOOK_SECRET = "Chuoi_Bi_Mat_Sieu_Cap_Cua_Rieng_Ban_123456";
+// =========================================================================
+// 2. CẤU HÌNH XÁC THỰC GMAIL API
+// =========================================================================
+const oauth2Client = new google.auth.OAuth2(
+  cleanEnv("GOOGLE_CLIENT_ID"),
+  cleanEnv("GOOGLE_CLIENT_SECRET"),
+  cleanEnv(
+    "GOOGLE_REDIRECT_URI",
+    "https://developers.google.com/oauthplayground",
+  ),
+);
 
-const imap = new Imap(IMAP_CONFIG);
+oauth2Client.setCredentials({
+  refresh_token: GMAIL_REFRESH_TOKEN,
+});
 
-// 2. Hàm gửi dữ liệu cào được về Backend Chợ Tài Khoản
-async function sendToBackend(bankTxId: string, amount: number, remark: string) {
-  try {
-    const response = await fetch(WEBHOOK_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-webhook-secret": WEBHOOK_SECRET,
-      },
-      body: JSON.stringify({ bankTxId, amount, transactionRemark: remark }),
-    });
+const gmail = google.gmail({ version: "v1", auth: oauth2Client });
+const app = express();
+app.use(express.json());
 
-    const result = (await response.json()) as any;
-    console.log(`[Backend Response]:`, result.message);
-  } catch (error) {
-    console.error(`[Webhook Error]: Không thể kết nối tới Backend`, error);
+// =========================================================================
+// 3. HÀM GỬI WEBHOOK SANG BACKEND CHỢ TÀI KHOẢN (Bất đồng bộ - Tự động thử lại)
+// =========================================================================
+async function sendToBackend(
+  bankTxId: string,
+  amount: number,
+  remark: string,
+  retries = 3,
+) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      const response = await fetch(WEBHOOK_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-webhook-secret": WEBHOOK_SECRET,
+        },
+        body: JSON.stringify({ bankTxId, amount, transactionRemark: remark }),
+      });
+
+      if (response.ok) {
+        console.log(
+          `✅ [Webhook Backend]: Giao dịch ${bankTxId} - +${amount}đ xử lý thành công.`,
+        );
+        return;
+      } else {
+        const result = (await response.json()) as any;
+        console.log(
+          `[Backend Response]:`,
+          result?.message || "Không có phản hồi",
+        );
+      }
+    } catch (error) {
+      console.warn(
+        `⚠️ [Webhook Backend]: Đơn ${bankTxId} lỗi gửi, thử lại lần ${i + 1}/${retries}...`,
+      );
+      await new Promise((res) => setTimeout(res, 2000));
+    }
   }
+  console.error(
+    `❌ [Webhook Backend]: Thất bại hoàn toàn khi gửi đơn ${bankTxId} sau ${retries} lần thử!`,
+  );
 }
 
-// 3. Hàm phân tích cú pháp Email sau khi nhận được
-export function parseEmailBody(text: string) {
+// =========================================================================
+// 4. HÀM PHÂN TÍCH CÚ PHÁP EMAIL (Dựa theo chuẩn Regex chạy ngon ở file cũ)
+// =========================================================================
+function parseAndProcessEmail(text: string, msgId: string) {
   try {
-    // Loại bỏ bớt khoảng trắng thừa để chuẩn hóa chuỗi dữ liệu đầu vào
+    // Loại bỏ bớt khoảng trắng thừa để chuẩn hóa chuỗi dữ liệu giống file cũ
     const cleanText = text.replace(/[ \t]+/g, " ");
 
-    // 1. Tìm mã giao dịch (Bao quát trường hợp chữ 'code' bị đẩy xuống dòng tiếp theo)
+    // 1. Tìm mã giao dịch
     const txMatch = cleanText.match(
       /(?:Mã giao dịch\/\s*Transaction[\s\n]*code):\s*([0-9]+)/i,
     );
-
-    // 2. Tìm số tiền ghi có (Bao quát trường hợp chữ 'Amount' bị đẩy xuống dòng tiếp theo)
+    // 2. Tìm số tiền ghi có (Đã sửa chữ 'có' chuẩn xác)
     const amountMatch = cleanText.match(
-      /(?:Số tiền ghi có\/Credit[\s\n]*Amount):\s*([0-9.,]+)/i,
+      /(?:Số tiền ghi có\/\s*Credit[\s\n]*Amount):\s*([0-9.,]+)/i,
     );
-
-    // 3. Tìm nội dung giao dịch (Quét đoạn text dài phía sau dấu hai chấm cho đến khi gặp dòng chữ "Nếu quý khách cần...")
+    // 3. Tìm nội dung giao dịch
     const remarkMatch = cleanText.match(
-      /(?:Nội dung giao dịch\/Transaction[\s\n]*remark):\s*([\s\S]*?)(?=Nếu quý khách cần|Please contact)/i,
+      /(?:Nội dung giao dịch\/\s*Transaction[\s\n]*remark):\s*([\s\S]*?)(?=Nếu quý khách cần|Please contact|$)/i,
     );
 
     if (txMatch && amountMatch && remarkMatch) {
       const bankTxId = txMatch[1].trim();
-      // Chuyển chuỗi định dạng "2,000" thành số nguyên 2000
       const amount = parseInt(amountMatch[1].replace(/[.,]/g, "").trim(), 10);
+      const remark = remarkMatch[1]
+        .replace(/[\r\n]+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
 
-      // Làm sạch chuỗi nội dung chuyển khoản (loại bỏ xuống dòng dư thừa)
-      const remark = remarkMatch[1].replace(/[\r\n]+/g, " ").trim();
+      if (amount > 0) {
+        console.log(`----------------------------------------`);
+        console.log(`🎯 [Phát hiện giao dịch hợp lệ]:`);
+        console.log(`- ID Thư trên Gmail: ${msgId}`);
+        console.log(`- Mã GD Ngân hàng  : ${bankTxId}`);
+        console.log(`- Số tiền nhận     : ${amount.toLocaleString("vi-VN")}đ`);
+        console.log(`- Nội dung (Memo)  : ${remark}`);
+        console.log(`----------------------------------------`);
 
-      console.log(`----------------------------------------`);
-      console.log(`[Phát hiện giao dịch thành công]:`);
-      console.log(`- Mã GD Ngân hàng  : ${bankTxId}`);
-      console.log(`- Số tiền nhận     : ${amount.toLocaleString("vi-VN")}đ`);
-      console.log(`- Nội dung (Memo)  : ${remark}`);
-      console.log(`----------------------------------------`);
-
-      // Gửi sang Backend xử lý cộng tiền
-      sendToBackend(bankTxId, amount, remark);
+        // Gửi sang Backend xử lý cộng tiền
+        sendToBackend(bankTxId, amount, remark).catch(console.error);
+      }
     } else {
       console.log(
-        "⚠️ [Parser Notice]: Email chứa từ khóa nhưng không bóc tách đủ 3 trường thông tin.",
+        `⚠️ [Parser Notice]: Thư ${msgId} chứa từ khóa nhưng bóc tách lỗi.`,
       );
-      // Log chi tiết dữ liệu nhận diện lỗi để kiểm tra cấu trúc lệch pha ở đâu
-      console.log("[Kết quả check nhanh]:", {
+      console.log("[Kết quả check nhanh vùng Regex]:", {
         hasTxId: !!txMatch,
         hasAmount: !!amountMatch,
         hasRemark: !!remarkMatch,
       });
     }
   } catch (err) {
-    console.error("[Parser Error]: Lỗi bóc tách dữ liệu chữ", err);
+    console.error("❌ [Parser Error]: Lỗi bóc tách chuỗi dữ liệu", err);
   }
 }
 
-function scanUnseenEmails() {
-  // Tìm các email CHƯA ĐỌC từ người gửi octo@cimb.com
-  imap.search(["UNSEEN", ["FROM", "octo@cimb.com"]], (err, results) => {
-    if (err || !results.length) return;
+// =========================================================================
+// 5. ROUTER TIẾP NHẬN WEBHOOK PUSH TỪ GOOGLE PUB/SUB GỬI VỀ
+// =========================================================================
+app.post("/api/v1/deposits/gmail-push", async (req, res) => {
+  // Trả về HTTP 200 OK ngay lập tức chống Google spam gửi lại tin
+  res.status(200).send("OK");
 
-    const f = imap.fetch(results, { bodies: "" });
+  try {
+    const pubsubMessage = req.body.message;
+    if (!pubsubMessage || !pubsubMessage.data) return;
 
-    f.on("message", (msg, seqno) => {
-      msg.on("body", (stream, info) => {
-        simpleParser(stream as any, async (err, parsed) => {
-          if (err) return;
+    // Giải mã payload Base64 từ Google Pub/Sub
+    const decodedData = Buffer.from(pubsubMessage.data, "base64").toString(
+      "utf-8",
+    );
+    const { emailAddress } = JSON.parse(decodedData);
 
-          // 1. Chuyển đổi nội dung email sang dạng text thô
-          let emailText = parsed.text || "";
-          if (!emailText && parsed.html) {
-            emailText = convert(parsed.html, {
-              wordwrap: false,
-              selectors: [
-                { selector: "a", options: { ignoreHref: true } },
-                { selector: "img", format: "skip" },
-              ],
-            });
-          }
+    console.log(
+      `\n⚡ [Pub/Sub]: Hộp thư ${emailAddress} vừa nổ biến động số dư!`,
+    );
 
-          console.log(`[Bot Email] ----------------------------------------`);
-          console.log(`[Đang xử lý Email số: ${seqno}]`);
-
-          // 2. ĐÁNH DẤU ĐÃ ĐỌC NGAY LẬP TỨC
-          // Đưa lên trên cùng của luồng xử lý sau khi bóc text thành công,
-          // đảm bảo email này sẽ KHÔNG bao giờ bị quét lại ở lần sau nữa.
-          imap.addFlags(results, ["Seen"], (err) => {
-            if (err) {
-              console.error(`❌ Lỗi đánh dấu đã đọc cho email ${seqno}:`, err);
-            } else {
-              console.log(`✅ Đã đánh dấu ĐÃ ĐỌC cho email ${seqno}`);
-            }
-
-            imap.expunge((expungeErr) => {
-            if (expungeErr) console.error("Lỗi expunge đồng bộ trạng thái:", expungeErr);
-            });
-  
-          });
-
-          
-
-          // 3. Kiểm tra từ khóa biến động số dư và xử lý
-          // Lưu ý: Cập nhật từ khóa "DEP" thay vì "DEP-" theo cấu trúc mã mới của bạn
-          if (emailText.includes("CIMB") || emailText.includes("DEP")) {
-            parseEmailBody(emailText);
-          } else {
-            console.log(
-              `ℹ️ Email ${seqno} không chứa từ khóa nạp tiền cần tìm. Bỏ qua.`,
-            );
-          }
-        });
-      });
+    // Quét các thư CHƯA ĐỌC từ người gửi octo@cimb.com
+    const response = await gmail.users.messages.list({
+      userId: "me",
+      q: "is:unread from:octo@cimb.com",
     });
-  });
-}
 
-// Thêm một biến để quản lý khoảng thời gian ping giữ mạng
-let keepAliveInterval: NodeJS.Timeout;
-
-// 5. Khởi chạy và giữ kết nối IMAP ổn định
-imap.once('ready', () => {
-  console.log('🤖 Bot Đọc Email Biến Động Số Dư Đã Sẵn Sàng Vận Hành!');
-  
-  imap.openBox("INBOX", (err, box) => {
-    if (err) {
-      console.error("Lỗi khi mở hộp thư INBOX:", err);
+    const messages = response.data.messages || [];
+    if (messages.length === 0) {
+      console.log("ℹ️ Không tìm thấy thư nào chưa đọc khớp bộ lọc.");
       return;
     }
 
+    // Xử lý song song tất cả email đổ về cùng thời điểm
+    await Promise.all(
+      messages.map(async (msg) => {
+        try {
+          const msgDetail = await gmail.users.messages.get({
+            userId: "me",
+            id: msg.id!,
+            format: "full",
+          });
+
+          // Giải thuật đệ quy trích xuất nội dung thư (Bao quát toàn bộ cấu trúc Multipart của Gmail API)
+          let rawBody = "";
+          const tríchXuấtBody = (part: any) => {
+            if (part.body?.data) {
+              rawBody +=
+                Buffer.from(part.body.data, "base64").toString("utf-8") + "\n";
+            }
+            if (part.parts) {
+              for (const subPart of part.parts) {
+                tríchXuấtBody(subPart);
+              }
+            }
+          };
+
+          const payload = msgDetail.data.payload;
+          if (payload) {
+            tríchXuấtBody(payload);
+          }
+
+          // Convert sang văn bản phẳng (Plain Text)
+          const emailText = rawBody.includes("<html")
+            ? convert(rawBody, { wordwrap: false })
+            : rawBody;
+
+          // Kiểm tra từ khóa hợp lệ giống hệt file cũ
+          if (emailText.includes("CIMB") || emailText.includes("DEP")) {
+            // Xóa nhãn UNREAD (Đánh dấu đã đọc) trên Server để chống xử lý lặp đơn
+            await gmail.users.messages.modify({
+              userId: "me",
+              id: msg.id!,
+              requestBody: { removeLabelIds: ["UNREAD"] },
+            });
+            console.log(
+              `✅ Đã xóa nhãn UNREAD (Đã đọc) thành công cho thư: ${msg.id}`,
+            );
+
+            // Tiến hành phân tích bóc tách tiền nạp
+            parseAndProcessEmail(emailText, msg.id!);
+          } else {
+            console.log(
+              `ℹ️ Email ${msg.id} không chứa từ khóa nạp tiền cần tìm. Bỏ qua.`,
+            );
+          }
+        } catch (msgErr) {
+          console.error(`❌ Lỗi khi xử lý chi tiết thư ${msg.id}:`, msgErr);
+        }
+      }),
+    );
+  } catch (error) {
+    console.error("❌ Lỗi luồng xử lý sự kiện Pub/Sub:", error);
+  }
+});
+
+// =========================================================================
+// 6. HÀM KHỞI CHẠY BOT VÀ KÍCH HOẠT THEO DÕI "WATCH" VỚI GOOGLE
+// =========================================================================
+export const startEmailBot = async () => {
+  try {
+    const res = await gmail.users.watch({
+      userId: "me",
+      requestBody: {
+        labelIds: ["INBOX"],
+        topicName: PUB_SUB_TOPIC,
+      },
+    });
     console.log(
-      `Hộp thư đã mở. Chế độ hiện tại: ${box.readOnly ? "Chỉ đọc (ReadOnly)" : "Đọc-Ghi (Read-Write)"}`,
+      "🚀 [Gmail API Push]: Thiết lập Watch theo dõi hộp thư thành công!",
+      res.data,
     );
 
-    if (box.readOnly) {
-      console.warn(
-        "⚠️ CẢNH BÁO: Hộp thư đang bị ép vào chế độ Chỉ đọc, không thể đánh dấu đã đọc!",
+    const PORT = 3001;
+    app.listen(PORT, () => {
+      console.log(
+        `🌐 Server Webhook Bot Email đang hoạt động tại Port: ${PORT}`,
       );
-    }
-
-    // Quét một lượt ngay khi khởi động bot
-    scanUnseenEmails();
-
-    // Lắng nghe sự kiện có mail mới
-    imap.on("mail", () => {
-      console.log("✉️ Có email mới đến! Đang tiến hành cào dữ liệu...");
-      scanUnseenEmails();
+      console.log(
+        `💓 Hệ thống Real-time chuẩn Doanh Nghiệp đã sẵn sàng vận hành.`,
+      );
     });
-
-    // CƠ CHẾ KEEP-ALIVE: Cứ mỗi 1 phút gửi 1 lệnh "PING" (noop) để bảo Google đừng ngắt kết nối
-    clearInterval(keepAliveInterval);
-    keepAliveInterval = setInterval(() => {
-      if (imap.state !== "disconnected") {
-        try {
-          // Chỉ kiểm tra email số 1 (Email đầu tiên trong hộp thư)
-          // Thao tác này cực kỳ đơn giản, ép socket tương tác với Gmail mà không cần bộ lọc phức tạp
-          imap.search(["1"], (err, results) => {
-            if (err) {
-              console.error(
-                "⚠️ [Keep-Alive Error]: Không thể gửi lệnh giữ kết nối:",
-                err.message,
-              );
-            } else {
-              console.log(
-                "💓 [Keep-Alive]: Thiết lập giữ kết nối với Gmail thành công!",
-              );
-            }
-          });
-        } catch (rawErr: any) {
-          console.error("⚠️ [Keep-Alive Exception]:", rawErr.message || rawErr);
-        }
-      }
-    }, 60 * 1000); // 60 giây
-  });
-});
-
-// XỬ LÝ LỖI KHÔNG ĐỂ CRASH SERVER
-imap.on('error', (err: any) => {
-  console.error('⚠️ [IMAP Error]:', err.message || err);
-  // Dọn dẹp interval tránh rò rỉ bộ nhớ khi mất kết nối
-  clearInterval(keepAliveInterval); 
-});
-
-// TỰ ĐỘNG KẾT NỐI LẠI HOÀN TOÀN KHI MẤT SOCKET
-imap.once('end', () => {
-  console.log('🔄 Kết nối IMAP đã bị ngắt từ phía Server. Đang thiết lập kết nối lại sau 5 giây...');
-  clearInterval(keepAliveInterval);
-  
-  setTimeout(() => {
-    // Đăng ký lại các sự kiện một lần nữa trước khi connect lại để tránh mất handler
-    imap.removeAllListeners();
-    setupImapListeners(); // Gọi hàm thiết lập lại kết nối bên dưới
-    imap.connect();
-  }, 5000);
-});
-
-// Bọc luồng đăng ký lại sự kiện để phục vụ việc tái kết nối lặp đi lặp lại
-function setupImapListeners() {
-  // Đóng gói lại các hàm imap.once('ready'), imap.once('error'), imap.once('end') vào đây nếu cần, 
-  // nhưng cách nhanh nhất để reset đối tượng imap bị lỗi EPIPE là khởi tạo lại tiến trình connect.
-}
-
-export const startEmailBot = () => {
-  imap.connect();
+  } catch (err: any) {
+    console.error(
+      "❌ Không thể thiết lập lệnh Watch với Google API:",
+      err.message || err,
+    );
+  }
 };
+
+startEmailBot();

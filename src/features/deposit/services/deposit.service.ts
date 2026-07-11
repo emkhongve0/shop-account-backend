@@ -76,48 +76,52 @@ export class DepositService {
     const userId = parseInt(depositCode.replace("DEP", ""), 10);
 
     return await prisma.$transaction(async (tx) => {
-      // 1. Kiểm tra chống trùng lặp dựa trên Mã giao dịch Ngân hàng (bankTxId độc nhất)
+      // 1. Kiểm tra chống trùng lặp dựa trên Mã giao dịch Ngân hàng (bankTxId độc nhất)[cite: 6]
       const duplicateTx = await tx.deposit.findUnique({ where: { bankTxId } });
       if (duplicateTx) {
         throw new Error("Giao dịch ngân hàng này đã được xử lý trước đó.");
       }
 
-      // Kiểm tra xem User có tồn tại thực tế trong hệ thống không
+      // Kiểm tra xem User có tồn tại thực tế trong hệ thống không[cite: 6]
       const user = await tx.user.findUnique({ where: { id: userId } });
       if (!user) {
         throw new Error("Người dùng không tồn tại trong hệ thống.");
       }
 
-      // 2. CHỈ TẠO BẢN GHI LỊCH SỬ NẠP KHI THÀNH CÔNG (Mặc định status = SUCCESS)
+      // 🌟 ĐƯA LOGIC TÍNH TOÁN SỐ DƯ LÊN TRÊN ĐẦY:
+      // Tính toán số dư và xử lý làm tròn để triệt tiêu sai số dấu phẩy động (Float) của JavaScript[cite: 6]
+      const balanceBefore = user.balance;
+      const balanceAfter = Math.round((user.balance + amount) * 100) / 100;
+
+      // 2. CHỈ TẠO BẢN GHI LỊCH SỬ NẠP KHI THÀNH CÔNG (Giờ đây đã có sẵn dữ liệu số dư)[cite: 6]
       const newDeposit = await tx.deposit.create({
         data: {
           userId: user.id,
           amount: amount,
           method: "BANKING",
-          status: "SUCCESS", // Trạng thái duy nhất, không có pending/expired
-          description: `${depositCode}-${bankTxId}`, // Ghép thêm mã Tx để tránh lỗi trùng @unique trường description cũ
+          status: "SUCCESS", // Trạng thái duy nhất, không có pending/expired[cite: 6]
+          description: `${depositCode}-${bankTxId}`, // Ghép thêm mã Tx để tránh lỗi trùng @unique trường description cũ[cite: 6]
           bankTxId: bankTxId,
-          expiredAt: new Date(), // Không giới hạn, lấy thời gian thực hiện làm mốc
+          expiredAt: new Date(), // Không giới hạn, lấy thời gian thực hiện làm mốc[cite: 6]
+          balanceBefore, // 🌟 Đã hợp lệ, không còn bị báo lỗi undefined nữa!
+          balanceAfter, // 🌟 Đã hợp lệ!
         },
       });
 
-      const balanceBefore = user.balance;
-      const balanceAfter = user.balance + amount;
-
-      // 3. Cập nhật số dư mới cho User
+      // 3. Cập nhật số dư mới cho User[cite: 6]
       await tx.user.update({
         where: { id: user.id },
         data: { balance: balanceAfter },
       });
 
-      // 4. Ghi nhận lịch sử biến động số dư (Wallet Transaction)
+      // 4. Ghi nhận lịch sử biến động số dư (Wallet Transaction) kèm balanceBefore & balanceAfter dữ liệu kiểu Float[cite: 6]
       await tx.walletTransaction.create({
         data: {
           userId: user.id,
           type: "DEPOSIT",
           amount: amount,
-          balanceBefore,
-          balanceAfter,
+          balanceBefore: balanceBefore, // Đã khớp định dạng Float viết hoa trong schema.prisma mới cập nhật[cite: 6]
+          balanceAfter: balanceAfter, // Đảm bảo đồng bộ hiển thị lịch sử ở Frontend[cite: 6]
           referenceId: depositCode,
           description: `Nạp tiền tự động thành công qua QR định danh (Mã GD: ${bankTxId})`,
         },

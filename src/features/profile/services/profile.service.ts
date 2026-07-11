@@ -185,6 +185,8 @@ export class ProfileService {
         status: true,
         description: true,
         createdAt: true,
+        balanceBefore: true,
+        balanceAfter: true,
       },
     });
   }

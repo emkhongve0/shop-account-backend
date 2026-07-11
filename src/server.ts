@@ -1,5 +1,5 @@
 import app from './app';
-import { startEmailBot } from './workers/email-reader.worker';
+import { startEmailBot } from "./workers/email-reader.worker";
 
 const PORT = Number(process.env.PORT) || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
