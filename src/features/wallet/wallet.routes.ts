@@ -1,17 +1,40 @@
+// src/features/wallet/wallet.routes.ts
 import { FastifyInstance } from "fastify";
+import { ZodTypeProvider } from "fastify-type-provider-zod";
 import { WalletController } from "./controllers/wallet.controller";
 import { authenticate } from "../../middlewares/auth.middleware";
+import {
+  walletHistoryQuerySchema,
+  walletDetailsSuccessResponseSchema,
+  walletErrorResponseSchema,
+} from "./schemas/wallet.schema";
 
 export async function walletRoutes(fastify: FastifyInstance) {
-  // Bắt buộc tất cả các route trong nhóm này phải có Bearer Token hợp lệ
+  // Tất cả các tuyến đường liên quan tới ví yêu cầu bắt buộc phải truyền Bearer Token hợp lệ
   fastify.addHook("preHandler", authenticate);
 
-  // Xem số dư & lịch sử ví
-  fastify.get("/me", WalletController.getWalletDetails);
+  // Chuyển định tuyến sang Type Provider của Zod để tự động hóa tài liệu OpenAPI/Swagger UI
+  const provider = fastify.withTypeProvider<ZodTypeProvider>();
 
-  // Nạp/trừ tiền trực tiếp cho User sở hữu Token
-  fastify.post("/deposit-test", WalletController.modifyMyWallet);
+  const SWAGGER_TAG = ["Wallet / Ví điện tử"];
 
-  // Thực hiện mua hàng (Trừ tiền ví)
-  fastify.post("/purchase", WalletController.testPurchase);
+  // API duy nhất thức tế: Lấy thông tin số dư và tra cứu lịch sử giao dịch ví cá nhân
+  provider.get(
+    "/me",
+    {
+      schema: {
+        tags: SWAGGER_TAG,
+        summary: "Xem số dư hiện tại và lịch sử biến động số dư ví",
+        description:
+          "Lấy số dư khả dụng thực tế của tài khoản hiện tại và liệt kê danh sách lịch sử nạp/trừ tiền theo cấu trúc phân trang.",
+        query: walletHistoryQuerySchema,
+        response: {
+          200: walletDetailsSuccessResponseSchema, // Trả về thông tin số dư kèm phân trang lịch sử giao dịch
+          400: walletErrorResponseSchema, // Lỗi nghiệp vụ dữ liệu đầu vào không hợp lệ
+          401: walletErrorResponseSchema, // Lỗi xác thực Token không chính xác/hết hạn
+        },
+      },
+    },
+    WalletController.getWalletDetails,
+  );
 }

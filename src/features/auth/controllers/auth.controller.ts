@@ -39,16 +39,31 @@ export const registerHandler = async (
       message: "Đăng ký thành công. Vui lòng kiểm tra email để xác thực.",
     });
   } catch (error: any) {
+    // 1. Đồng bộ mã lỗi trùng Email hệ thống dạng UPPER_CASE
     if (error.message === "AUTH_EMAIL_EXISTS") {
-      return reply
-        .status(400)
-        .send({ success: false, message: "Email đã được sử dụng." });
+      return reply.status(400).send({
+        success: false,
+        code: "AUTH_EMAIL_EXISTS",
+        message: "Email đã được sử dụng.",
+      });
+    }
+
+    // 2. 🔥 THÊM VÀO ĐÂY: Trả mã lỗi chữ hoa khi xác thực Captcha thất bại (Kịch bản 2)
+    if (error.message === "AUTH_CAPTCHA_FAILED") {
+      return reply.status(400).send({
+        success: false,
+        code: "AUTH_CAPTCHA_FAILED",
+        message:
+          "Xác thực Captcha không hợp lệ hoặc đã hết hạn. Vui lòng thử lại.",
+      });
     }
 
     request.server.log.error(error);
-    return reply
-      .status(500)
-      .send({ success: false, message: "Đã có lỗi hệ thống xảy ra." });
+    return reply.status(500).send({
+      success: false,
+      code: "INTERNAL_SERVER_ERROR",
+      message: "Đã có lỗi hệ thống xảy ra.",
+    });
   }
 };
 

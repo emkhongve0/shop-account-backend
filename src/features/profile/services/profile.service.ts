@@ -1,6 +1,6 @@
 import { PrismaClient } from '@prisma/client';
-import bcrypt from 'bcrypt';
 import { ChangePasswordInput } from '../schemas/profile.schema';
+import * as argon2 from "argon2";
 
 const prisma = new PrismaClient();
 
@@ -44,8 +44,9 @@ export class ProfileService {
     });
   }
 
+  
   /**
-   * LOGIC ĐỔI MẬT KHẨU (GIỚI HẠN 1 GIỜ / LẦN)
+   * LOGIC ĐỔI MẬT KHẨU (TỐI ƯU TỐC ĐỘ + ĐỒNG BỘ ARGON2)
    */
   static async changePassword(
     userId: number,
@@ -78,35 +79,39 @@ export class ProfileService {
     const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new Error("USER_NOT_FOUND");
 
-    // 3. So sánh mật khẩu cũ xem đúng không
-    const isPasswordValid = await bcrypt.compare(
-      data.oldPassword,
+    // 3. TỐI ƯU CPU: So sánh mật khẩu cũ bằng Argon2 cực nhanh (~30ms)
+    const isPasswordValid = await argon2.verify(
       user.passwordHash,
+      data.oldPassword,
     );
     if (!isPasswordValid) {
       throw new Error("AUTH_INVALID_OLD_PASSWORD");
     }
 
-    // 4. Băm mật khẩu mới và cập nhật vào Database
-    const saltRounds = 12;
-    const newPasswordHash = await bcrypt.hash(data.newPassword, saltRounds);
+    // 4. TỐI ƯU CPU: Băm mật khẩu mới bằng Argon2
+    const newPasswordHash = await argon2.hash(data.newPassword);
 
-    await prisma.user.update({
-      where: { id: userId },
-      data: { passwordHash: newPasswordHash },
-    });
-
-    // 5. Ghi nhận log đổi mật khẩu thành công
     const device = context.userAgent.includes("Mobile") ? "Mobile" : "Desktop";
-    await prisma.authLog.create({
-      data: {
-        userId,
-        action: "CHANGE_PASSWORD_SUCCESS",
-        ip: context.ip,
-        userAgent: context.userAgent,
-        device,
-        country: "Unknown",
-      },
+
+    // 5. Sử dụng Transaction để bọc hai thao tác ghi DB, tránh lệch dữ liệu và tối ưu connection pool
+    await prisma.$transaction(async (tx) => {
+      // Cập nhật mật khẩu mới vào Database
+      await tx.user.update({
+        where: { id: userId },
+        data: { passwordHash: newPasswordHash },
+      });
+
+      // Ghi nhận log đổi mật khẩu thành công ngay trong cùng kết nối
+      await tx.authLog.create({
+        data: {
+          userId,
+          action: "CHANGE_PASSWORD_SUCCESS",
+          ip: context.ip,
+          userAgent: context.userAgent,
+          device,
+          country: "Unknown",
+        },
+      });
     });
   }
 

@@ -5,6 +5,7 @@ import {
   serializerCompiler,
   validatorCompiler,
 } from "fastify-type-provider-zod";
+import { registerSwagger } from "./plugins/swagger"; // <-- 1. IMPORT SWAGGER
 import authRoutes from "./features/auth/auth.routes";
 import profileRoutes from "./features/profile/profile.routes";
 import voucherRoutes from "./features/voucher/voucher.routes";
@@ -19,7 +20,7 @@ import { notificationRoutes } from "./features/notification/notification.routes"
 import { adminUserRoutes } from "./features/user/admin-user.routes";
 import { initCleanupJob } from "./jobs/cleanupLog.job";
 import cors from "@fastify/cors";
-import fastifyWebsocket from "@fastify/websocket"; // <-- THÊM MỚI LINE NÀY
+import fastifyWebsocket from "@fastify/websocket";
 
 const app: FastifyInstance = Fastify({
   logger: true,
@@ -33,29 +34,25 @@ app.register(cors, {
   credentials: true,
 });
 
-// 2. Đăng ký Plugin WebSocket của Fastify hệ thống (Quan trọng: Đặt TRƯỚC khi đăng ký các route phân hệ)
+// 2. Đăng ký Plugin WebSocket của Fastify hệ thống
 app.register(fastifyWebsocket);
 
-// 3. Khởi tạo một bộ nhớ Map dùng chung toàn cục để lưu trữ Socket của từng User theo ID tài khoản
+// 3. Khởi tạo một bộ nhớ Map dùng chung toàn cục để lưu trữ Socket
 export const websocketClients = new Map<number, any>();
 
-// 4. Mở cổng định tuyến sự kiện WebSocket lắng nghe từ Frontend kết nối lên
+// 4. Mở cổng định tuyến sự kiện WebSocket
 app.register(async function (fastify) {
   fastify.get("/ws/deposit", { websocket: true }, (connection, req) => {
     const urlParams = new URLSearchParams(req.url.split("?")[1]);
     const userId = Number(urlParams.get("userId"));
 
     if (userId && !isNaN(userId)) {
-      // ĐÚNG CHUẨN: Bản thân connection chính là socket stream, hoặc lấy qua connection.socket tùy phiên bản.
-      // Giải pháp an toàn nhất: Thử lấy connection.socket trước, nếu không có thì dùng chính connection
       const socket = connection.socket ? connection.socket : connection;
-
       websocketClients.set(userId, socket);
       fastify.log.info(
         `🔌 [WEBSOCKET] Tài khoản ID: ${userId} đã mở kết nối thành công.`,
       );
 
-      // FIX LỖI (reading 'on'): Đăng ký sự kiện close trên đối tượng socket vừa tìm được
       socket.on("close", () => {
         websocketClients.delete(userId);
         fastify.log.info(
@@ -68,7 +65,6 @@ app.register(async function (fastify) {
 
 const prisma = new PrismaClient();
 
-// Hàm dọn dẹp chạy ngầm, gọi mỗi ngày một lần hoặc khi khởi động server
 async function autoCleanupSoldAccounts() {
   const thirtyDaysAgo = new Date();
   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
@@ -83,18 +79,19 @@ async function autoCleanupSoldAccounts() {
   );
 }
 
-// tự động dọn dẹp các token đã đăng xuất sau 12h
 initCleanupJob();
 
 // ĐĂNG KÝ RATE LIMIT TOÀN CỤC
 app.register(fastifyRateLimit, {
-  max: 100,
+  global: true, // Bật global bảo vệ toàn sàn mặc định chống DDoS cơ bản
+  max: 100, // Các API thông thường được gọi tối đa 100 lần/phút
   timeWindow: "1 minute",
   errorResponseBuilder: (request, context) => {
     return {
       success: false,
-      message: `Bạn đang thao tác quá nhanh. Vui lòng thử lại sau ${context.after}.`,
       statusCode: 429,
+      error: "Too Many Requests",
+      message: `Bạn đang thao tác quá nhanh. Vui lòng thử lại sau ${context.after}.`,
     };
   },
 });
@@ -102,19 +99,24 @@ app.register(fastifyRateLimit, {
 app.setValidatorCompiler(validatorCompiler);
 app.setSerializerCompiler(serializerCompiler);
 
-app.register(fastifyRateLimit, {
-  global: false,
-});
-
 app.register(fastifyJwt, {
   secret: process.env.JWT_SECRET || "sieubao_mat_key_123_!",
 });
+
+// --- KÍCH HOẠT VÀ TÍCH HỢP SWAGGER VÀO HỆ THỐNG ---
+registerSwagger(app)
+  .then(() => {
+    app.log.info("Swagger đăng ký thành công!");
+  })
+  .catch((err) => {
+    app.log.error("Lỗi khởi tạo Swagger:", err);
+  }); // <-- 2. KÍCH HOẠT CHẠY SWAGGER UI
 
 // Đăng ký các phân hệ tuyến đường hệ thống
 app.register(authRoutes, { prefix: "/api/v1/auth" });
 app.register(profileRoutes, { prefix: "/api/v1/profile" });
 app.register(voucherRoutes, { prefix: "/api/v1/vouchers" });
-app.register(depositRoutes, { prefix: "/api/v1/deposits" }); // Phân hệ nạp tiền
+app.register(depositRoutes, { prefix: "/api/v1/deposits" });
 app.register(walletRoutes, { prefix: "/api/v1/wallet" });
 app.register(categoryRoutes, { prefix: "/api/v1/categories" });
 app.register(productRoutes, { prefix: "/api/v1" });

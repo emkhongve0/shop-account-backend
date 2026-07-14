@@ -29,11 +29,13 @@ export const getLoginHistoryHandler = async (
       success: true,
       data: history,
     });
-  } catch (error) {
+  } catch (error: any) {
     request.server.log.error(error);
-    return reply
-      .status(500)
-      .send({ success: false, message: "Đã có lỗi hệ thống xảy ra." });
+    return reply.status(400).send({
+      success: false,
+      code: "VALIDATION_ERROR",
+      message: error.message || "Đã có lỗi hệ thống xảy ra.",
+    });
   }
 };
 
@@ -54,126 +56,13 @@ export const getActiveSessionsHandler = async (
       success: true,
       data: sessions,
     });
-  } catch (error) {
-    request.server.log.error(error);
-    return reply
-      .status(500)
-      .send({ success: false, message: "Đã có lỗi hệ thống xảy ra." });
-  }
-};
-
-/**
- * LẤY THÔNG TIN PROFILE CỦA TÔI
- */
-export const getMyProfileHandler = async (
-  request: FastifyRequest,
-  reply: FastifyReply,
-) => {
-  try {
-    // Ép kiểu trực tiếp cho request ở đây
-    const authRequest = request as AuthenticatedRequest;
-    const userId = authRequest.user.id;
-
-    const profile = await ProfileService.getProfile(userId);
-
-    return reply.status(200).send({
-      success: true,
-      data: profile,
-    });
   } catch (error: any) {
-    if (error.message === "USER_NOT_FOUND") {
-      return reply
-        .status(404)
-        .send({ success: false, message: "Người dùng không tồn tại." });
-    }
     request.server.log.error(error);
-    return reply
-      .status(500)
-      .send({ success: false, message: "Đã có lỗi hệ thống xảy ra." });
-  }
-};
-
-/**
- * CẬP NHẬT THÔNG TIN PROFILE
- */
-export const updateProfileHandler = async (
-  request: FastifyRequest<{ Body: UpdateProfileInput }>,
-  reply: FastifyReply,
-) => {
-  try {
-    // Ép kiểu tương tự cho API update
-    const authRequest = request as unknown as AuthenticatedRequest & {
-      body: UpdateProfileInput;
-    };
-    const userId = authRequest.user.id;
-
-    const updatedProfile = await ProfileService.updateProfile(
-      userId,
-      request.body,
-    );
-
-    return reply.status(200).send({
-      success: true,
-      message: "Cập nhật thông tin cá nhân thành công.",
-      data: updatedProfile,
+    return reply.status(400).send({
+      success: false,
+      code: "VALIDATION_ERROR",
+      message: error.message || "Đã có lỗi hệ thống xảy ra.",
     });
-  } catch (error) {
-    request.server.log.error(error);
-    return reply
-      .status(500)
-      .send({ success: false, message: "Đã có lỗi hệ thống xảy ra." });
-  }
-};
-
-/**
- * XỬ LÝ ĐỔI MẬT KHẨU
- */
-export const changePasswordHandler = async (
-  request: FastifyRequest<{ Body: ChangePasswordInput }>,
-  reply: FastifyReply,
-) => {
-  try {
-    const authRequest = request as unknown as AuthenticatedRequest & {
-      body: ChangePasswordInput;
-    };
-    const userId = authRequest.user.id;
-    const context = {
-      ip: request.ip,
-      userAgent: request.headers["user-agent"] || "Unknown",
-    };
-
-    // Gọi Service xử lý toàn bộ logic phức tạp
-    await ProfileService.changePassword(userId, request.body, context);
-
-    return reply.status(200).send({
-      success: true,
-      message: "Đổi mật khẩu thành công.",
-    });
-  } catch (error: any) {
-    if (error.message.startsWith("AUTH_CHANGE_PASSWORD_COOLDOWN")) {
-      const minutes = error.message.split(":")[1];
-      return reply.status(429).send({
-        success: false,
-        message: `Bạn đã đổi mật khẩu gần đây. Vui lòng thử lại sau ${minutes} phút (Giới hạn 1 giờ/lần).`,
-      });
-    }
-
-    if (error.message === "AUTH_INVALID_OLD_PASSWORD") {
-      return reply
-        .status(400)
-        .send({ success: false, message: "Mật khẩu cũ không chính xác." });
-    }
-
-    if (error.message === "USER_NOT_FOUND") {
-      return reply
-        .status(404)
-        .send({ success: false, message: "Tài khoản không tồn tại." });
-    }
-
-    request.server.log.error(error);
-    return reply
-      .status(500)
-      .send({ success: false, message: "Đã có lỗi hệ thống xảy ra." });
   }
 };
 
@@ -192,11 +81,13 @@ export const getDepositHistoryHandler = async (
       success: true,
       data: history,
     });
-  } catch (error) {
+  } catch (error: any) {
     request.server.log.error(error);
-    return reply
-      .status(500)
-      .send({ success: false, message: "Đã có lỗi hệ thống xảy ra." });
+    return reply.status(400).send({
+      success: false,
+      code: "VALIDATION_ERROR",
+      message: error.message || "Đã có lỗi hệ thống xảy ra.",
+    });
   }
 };
 
@@ -217,16 +108,18 @@ export const getPurchaseHistoryHandler = async (
       success: true,
       data: history,
     });
-  } catch (error) {
+  } catch (error: any) {
     request.server.log.error(error);
-    return reply
-      .status(500)
-      .send({ success: false, message: "Đã có lỗi hệ thống xảy ra." });
+    return reply.status(400).send({
+      success: false,
+      code: "VALIDATION_ERROR",
+      message: error.message || "Đã có lỗi hệ thống xảy ra.",
+    });
   }
 };
 
 /**
- * XỬ LÝ LẤY DANH SÁCH THÔNG BÁO
+ * XỬ LÝ LẤY HÒM THƯ THÔNG BÁO
  */
 export const getNotificationsHandler = async (
   request: FastifyRequest,
@@ -240,48 +133,147 @@ export const getNotificationsHandler = async (
 
     return reply.status(200).send({
       success: true,
-      data: {
-        notifications,
-      },
+      data: notifications,
     });
-  } catch (error) {
+  } catch (error: any) {
     request.server.log.error(error);
-    return reply
-      .status(500)
-      .send({ success: false, message: "Đã có lỗi hệ thống xảy ra." });
+    return reply.status(400).send({
+      success: false,
+      code: "VALIDATION_ERROR",
+      message: error.message || "Đã có lỗi hệ thống xảy ra.",
+    });
   }
 };
 
 /**
- * XỬ LÝ ĐÁNH DẤU ĐÃ ĐỌC MỘT THÔNG BÁO (Bổ sung mới)
+ * XỬ LÝ LẤY THÔNG TIN CÁ NHÂN & SỐ DƯ
  */
-export const markNotificationAsReadHandler = async (
-  request: FastifyRequest<{ Params: { id: string } }>, 
-  reply: FastifyReply
+export const getMyProfileHandler = async (
+  request: FastifyRequest,
+  reply: FastifyReply,
 ) => {
   try {
-    const authRequest = request as unknown as AuthenticatedRequest;
-    const notificationId = parseInt(request.params.id, 10);
+    const authRequest = request as AuthenticatedRequest;
+    const user = await ProfileService.getProfile(authRequest.user.id);
+    return reply.status(200).send({ success: true, data: user });
+  } catch (error: any) {
+    return reply.status(404).send({
+      success: false,
+      code: "NOT_FOUND",
+      message: "Không tìm thấy thông tin tài khoản người dùng.",
+    });
+  }
+};
+
+/**
+ * XỬ LÝ CẬP NHẬT THÔNG TIN CÁ NHÂN
+ */
+export const updateProfileHandler = async (
+  request: FastifyRequest,
+  reply: FastifyReply,
+) => {
+  try {
+    const authRequest = request as AuthenticatedRequest;
+    const result = await ProfileService.updateProfile(
+      authRequest.user.id,
+      request.body as UpdateProfileInput,
+    );
+    return reply.status(200).send({
+      success: true,
+      message: "Cập nhật thông tin cá nhân thành công.",
+      data: result,
+    });
+  } catch (error: any) {
+    return reply.status(400).send({
+      success: false,
+      code: "VALIDATION_ERROR",
+      message: error.message || "Cập nhật thông tin thất bại.",
+    });
+  }
+};
+
+/**
+ * XỬ LÝ ĐỔI MẬT KHẨU
+ */
+export const changePasswordHandler = async (
+  request: FastifyRequest,
+  reply: FastifyReply,
+) => {
+  try {
+    const authRequest = request as AuthenticatedRequest;
+    const body = request.body as ChangePasswordInput;
+
+    // Lấy IP và User Agent từ request để truyền làm context cho Service
+    const ip = request.ip || "Unknown IP";
+    const userAgent = request.headers["user-agent"] || "Unknown Agent";
+
+    // TRUYỀN ĐÚNG CẤU TRÚC OBJECT MÀ SERVICE YÊU CẦU
+    await ProfileService.changePassword(authRequest.user.id, body, {
+      ip,
+      userAgent,
+    });
+
+    return reply.status(200).send({
+      success: true,
+      message:
+        "Đổi mật khẩu thành công! Vui lòng sử dụng mật khẩu mới cho lần đăng nhập sau.",
+    });
+  } catch (error: any) {
+    return reply.status(400).send({
+      success: false,
+      code: "VALIDATION_ERROR",
+      message: error.message || "Đổi mật khẩu thất bại.",
+    });
+  }
+};
+
+/**
+ * XỬ LÝ ĐÁNH DẤU ĐỌC MỘT THÔNG BÁO CỤ THỂ
+ */
+export const markNotificationAsReadHandler = async (
+  request: FastifyRequest,
+  reply: FastifyReply,
+) => {
+  try {
+    const authRequest = request as AuthenticatedRequest;
+    const { id } = request.params as { id: string };
+    const notificationId = parseInt(id, 10);
 
     if (isNaN(notificationId)) {
-      return reply.status(400).send({ success: false, message: 'ID thông báo không hợp lệ.' });
+      return reply.status(400).send({
+        success: false,
+        code: "VALIDATION_ERROR",
+        message: "ID thông báo không hợp lệ.",
+      });
     }
 
     await ProfileService.markAsRead(authRequest.user.id, notificationId);
 
     return reply.status(200).send({
       success: true,
-      message: 'Đã đánh dấu đọc thông báo này.'
+      message: "Đã đánh dấu đọc thông báo này.",
     });
   } catch (error: any) {
-    if (error.message === 'NOTIFICATION_NOT_FOUND') {
-      return reply.status(404).send({ success: false, message: 'Thông báo không tồn tại.' });
+    if (error.message === "NOTIFICATION_NOT_FOUND") {
+      return reply.status(404).send({
+        success: false,
+        code: "NOT_FOUND",
+        message: "Thông báo không tồn tại.",
+      });
     }
-    if (error.message === 'UNAUTHORIZED') {
-      return reply.status(403).send({ success: false, message: 'Bạn không có quyền đọc thông báo này.' });
+    if (error.message === "UNAUTHORIZED") {
+      return reply.status(403).send({
+        success: false,
+        code: "FORBIDDEN",
+        message: "Bạn không có quyền đọc thông báo này.",
+      });
     }
     request.server.log.error(error);
-    return reply.status(500).send({ success: false, message: 'Đã có lỗi hệ thống xảy ra.' });
+    return reply.status(500).send({
+      success: false,
+      code: "SERVER_ERROR",
+      message: "Đã có lỗi hệ thống xảy ra.",
+    });
   }
 };
 
@@ -298,15 +290,16 @@ export const markAllNotificationsAsReadHandler = async (
     // Gọi sang dịch vụ để update DB
     await ProfileService.markAllAsRead(authRequest.user.id);
 
-    // BẮT BUỘC TRẢ VỀ success: true để Frontend bắt được dữ liệu
     return reply.status(200).send({
       success: true,
-      message: "Đã đánh dấu đọc toàn bộ thông báo thành công.",
+      message: "Đã đánh dấu đọc tất cả thông báo thành công.",
     });
-  } catch (error) {
+  } catch (error: any) {
     request.server.log.error(error);
-    return reply
-      .status(500)
-      .send({ success: false, message: "Đã có lỗi hệ thống xảy ra." });
+    return reply.status(500).send({
+      success: false,
+      code: "SERVER_ERROR",
+      message: "Không thể cập nhật trạng thái thông báo.",
+    });
   }
 };

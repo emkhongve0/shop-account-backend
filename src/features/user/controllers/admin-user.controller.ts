@@ -68,22 +68,34 @@ export class AdminUserController {
   static async changeBalance(request: FastifyRequest, reply: FastifyReply) {
     try {
       const { id } = request.params as { id: string };
-      const { amount, description } = request.body as {
-        amount: number;
-        description: string;
-      };
+      const { amount, description } = request.body as any;
+      const adminId = (request as any).user.id;
 
+      // 1. Lấy khóa chống trùng lặp từ Header
+      const idempotencyKey = request.headers["x-idempotency-key"] as string;
+
+      // 2. Truyền xuống Service
       const result = await AdminUserService.adjustBalance(
         parseInt(id, 10),
         amount,
         description,
+        adminId,
+        idempotencyKey, // <- TRUYỀN THÊM VÀO ĐÂY
       );
+
       return reply.send({
         success: true,
         message: amount > 0 ? "Cộng tiền thành công." : "Trừ tiền thành công.",
         data: result,
       });
     } catch (error: any) {
+      // Bắt riêng lỗi trùng lặp để báo về Frontend hợp lý
+      if (error.message === "DUPLICATE_REQUEST") {
+        return reply.status(409).send({
+          success: false,
+          message: "Giao dịch này đang được xử lý hoặc đã hoàn tất trước đó.",
+        });
+      }
       return reply.status(400).send({ success: false, message: error.message });
     }
   }

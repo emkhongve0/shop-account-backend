@@ -1,3 +1,4 @@
+// src/features/inventory/controllers/inventory.controller.ts
 import { FastifyRequest, FastifyReply } from "fastify";
 import { InventoryService } from "../services/inventory.service";
 import { AccountStatus } from "@prisma/client";
@@ -9,13 +10,19 @@ export class InventoryController {
         productId?: string;
         status?: AccountStatus;
       };
+
       const result = await InventoryService.getAllInventory({
         productId: productId ? parseInt(productId, 10) : undefined,
         status,
       });
+
       return reply.send({ success: true, data: result });
     } catch (error: any) {
-      return reply.status(400).send({ success: false, message: error.message });
+      return reply.status(400).send({
+        success: false,
+        code: "VALIDATION_ERROR", // Đồng bộ mã lỗi cho luồng query
+        message: error.message,
+      });
     }
   }
 
@@ -25,22 +32,28 @@ export class InventoryController {
       const result = await InventoryService.getAccountById(parseInt(id, 10));
       return reply.send({ success: true, data: result });
     } catch (error: any) {
-      return reply.status(404).send({ success: false, message: error.message });
+      return reply.status(404).send({
+        success: false,
+        code: "NOT_FOUND", // Đồng bộ mã lỗi 404 không tìm thấy nick
+        message: error.message,
+      });
     }
   }
 
   static async create(request: FastifyRequest, reply: FastifyReply) {
     try {
       const result = await InventoryService.createAccount(request.body as any);
-      return reply
-        .status(201)
-        .send({
-          success: true,
-          message: "Thêm tài khoản thành công.",
-          data: result,
-        });
+      return reply.status(201).send({
+        success: true,
+        message: "Thêm tài khoản thành công.",
+        data: result,
+      });
     } catch (error: any) {
-      return reply.status(400).send({ success: false, message: error.message });
+      return reply.status(400).send({
+        success: false,
+        code: "VALIDATION_ERROR",
+        message: error.message,
+      });
     }
   }
 
@@ -50,16 +63,23 @@ export class InventoryController {
         productId: number;
         rawTxtData: string;
       };
+
       const result = await InventoryService.importAccounts(
         productId,
         rawTxtData,
       );
-      return reply.send({
+
+      return reply.status(201).send({
         success: true,
-        message: `Import thành công ${result.importedCount} tài khoản.`,
+        message: "Nhập tài khoản hàng loạt thành công.",
+        data: result,
       });
     } catch (error: any) {
-      return reply.status(400).send({ success: false, message: error.message });
+      return reply.status(400).send({
+        success: false,
+        code: "VALIDATION_ERROR",
+        message: error.message,
+      });
     }
   }
 
@@ -76,7 +96,11 @@ export class InventoryController {
         data: result,
       });
     } catch (error: any) {
-      return reply.status(400).send({ success: false, message: error.message });
+      return reply.status(400).send({
+        success: false,
+        code: "VALIDATION_ERROR",
+        message: error.message,
+      });
     }
   }
 
@@ -89,7 +113,11 @@ export class InventoryController {
         message: "Xóa tài khoản thành công.",
       });
     } catch (error: any) {
-      return reply.status(400).send({ success: false, message: error.message });
+      return reply.status(400).send({
+        success: false,
+        code: "VALIDATION_ERROR",
+        message: error.message,
+      });
     }
   }
 
@@ -109,13 +137,17 @@ export class InventoryController {
       // Thiết lập header để trình duyệt/Postman hiểu đây là file tải về
       reply.header(
         "Content-Disposition",
-        `attachment; filename="export_product_${productId}.txt"`,
+        `attachment; filename=\"export_product_${productId}.txt\"`,
       );
       reply.header("Content-Type", "text/plain; charset=utf-8");
 
-      return reply.send(txtContent);
+      return reply.status(200).send(txtContent);
     } catch (error: any) {
-      return reply.status(400).send({ success: false, message: error.message });
+      return reply.status(400).send({
+        success: false,
+        code: "VALIDATION_ERROR",
+        message: error.message,
+      });
     }
   }
 }

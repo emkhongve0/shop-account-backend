@@ -1,6 +1,6 @@
+// src/features/order/controllers/order.controller.ts
 import { FastifyRequest, FastifyReply } from "fastify";
 import { OrderService } from "../services/order.service";
-import { OrderStatus } from "@prisma/client";
 
 export class OrderController {
   // --- DÀNH CHO USER ---
@@ -13,7 +13,11 @@ export class OrderController {
       );
       return reply.send({ success: true, data: result });
     } catch (error: any) {
-      return reply.status(400).send({ success: false, message: error.message });
+      return reply.status(400).send({
+        success: false,
+        code: "VALIDATION_ERROR",
+        message: error.message,
+      });
     }
   }
 
@@ -27,7 +31,11 @@ export class OrderController {
       const result = await OrderService.getUserOrderDetails(orderId, userId);
       return reply.send({ success: true, data: result });
     } catch (error: any) {
-      return reply.status(404).send({ success: false, message: error.message });
+      return reply.status(404).send({
+        success: false,
+        code: "NOT_FOUND",
+        message: error.message,
+      });
     }
   }
 
@@ -37,7 +45,11 @@ export class OrderController {
       const result = await OrderService.getAdminOrders(request.query as any);
       return reply.send({ success: true, data: result });
     } catch (error: any) {
-      return reply.status(400).send({ success: false, message: error.message });
+      return reply.status(400).send({
+        success: false,
+        code: "VALIDATION_ERROR",
+        message: error.message,
+      });
     }
   }
 
@@ -50,7 +62,11 @@ export class OrderController {
       const result = await OrderService.getAdminOrderDetails(orderId);
       return reply.send({ success: true, data: result });
     } catch (error: any) {
-      return reply.status(404).send({ success: false, message: error.message });
+      return reply.status(404).send({
+        success: false,
+        code: "NOT_FOUND",
+        message: error.message,
+      });
     }
   }
 }

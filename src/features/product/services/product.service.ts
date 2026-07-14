@@ -128,6 +128,26 @@ export class ProductService {
   }
 
   /**
+   * ADMIN: CẬP NHẬT NHANH TRẠNG THÁI SẢN PHẨM (ACTIVE / INACTIVE)
+   */
+  static async updateStatus(id: number, status: ProductStatus) {
+    // 1. Kiểm tra sản phẩm có tồn tại hay không trước khi update
+    const exist = await prisma.product.findUnique({
+      where: { id },
+    });
+
+    if (!exist) {
+      throw new Error("Không tìm thấy sản phẩm cần cập nhật trạng thái.");
+    }
+
+    // 2. Tiến hành cập nhật trạng thái mới
+    return await prisma.product.update({
+      where: { id },
+      data: { status },
+    });
+  }
+
+  /**
    * ADMIN: XÓA CỨNG SẢN PHẨM
    */
   static async deleteProduct(id: number) {

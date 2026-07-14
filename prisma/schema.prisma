@@ -63,11 +63,10 @@ model WalletTransaction {
   amount        Int // Số tiền biến động (Luôn lưu số dương, phân biệt tăng giảm qua `type`)
   balanceBefore Float             @map("balance_before") // Số dư TRƯỚC khi đổi
   balanceAfter  Float             @map("balance_after") // Số dư SAU khi đổi
-
   referenceId String? @map("reference_id") // Mã đơn nạp (DEPxxx) hoặc mã đơn hàng (ORDxxx)
   description String? // Lý do biến động (Khuyến mãi, Mua Facebook VIA...)
-
   createdAt DateTime @default(now()) @map("created_at")
+  idempotencyKey  String?  @unique
 
   @@map("wallet_transactions")
 }

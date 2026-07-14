@@ -1,3 +1,4 @@
+// src/features/notification/controllers/notification.controller.ts
 import { FastifyRequest, FastifyReply } from "fastify";
 import { NotificationService } from "../services/notification.service";
 
@@ -20,19 +21,27 @@ export class NotificationController {
       );
       return reply.send({ success: true, data: result });
     } catch (error: any) {
-      return reply.status(400).send({ success: false, message: error.message });
+      return reply.status(400).send({
+        success: false,
+        code: "VALIDATION_ERROR",
+        message: error.message,
+      });
     }
   }
 
   static async readOne(request: FastifyRequest, reply: FastifyReply) {
     try {
       const userId = (request.user as any).id;
-      const { id } = request.params as { id: string }; // id nhận từ URL dạng string
+      const { id } = request.params as { id: string };
 
-      await NotificationService.markAsRead(parseInt(id, 10), userId); // Ép sang kiểu số Int
+      await NotificationService.markAsRead(parseInt(id, 10), userId);
       return reply.send({ success: true, message: "Đã đọc thông báo." });
     } catch (error: any) {
-      return reply.status(400).send({ success: false, message: error.message });
+      return reply.status(400).send({
+        success: false,
+        code: "VALIDATION_ERROR",
+        message: error.message,
+      });
     }
   }
 
@@ -45,7 +54,11 @@ export class NotificationController {
         message: "Đã đánh dấu đọc tất cả thông báo.",
       });
     } catch (error: any) {
-      return reply.status(400).send({ success: false, message: error.message });
+      return reply.status(400).send({
+        success: false,
+        code: "VALIDATION_ERROR",
+        message: error.message,
+      });
     }
   }
 
@@ -70,15 +83,17 @@ export class NotificationController {
         result = await NotificationService.sendToUser(userId, title, content);
       }
 
-      return reply
-        .status(201)
-        .send({
-          success: true,
-          message: "Gửi thông báo thành công.",
-          data: result,
-        });
+      return reply.status(201).send({
+        success: true,
+        message: "Gửi thông báo thành công.",
+        data: result,
+      });
     } catch (error: any) {
-      return reply.status(400).send({ success: false, message: error.message });
+      return reply.status(400).send({
+        success: false,
+        code: "VALIDATION_ERROR",
+        message: error.message,
+      });
     }
   }
 }
